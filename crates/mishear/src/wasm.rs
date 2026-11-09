@@ -69,9 +69,12 @@ pub struct SearchDto {
     pub results: usize,
     /// Every match within this cost; `null` for the exact top `results`.
     pub within: Option<f32>,
-    pub lm_weight: f32,
+    /// Cost per nat of a word's rarity.
+    pub commonness: f32,
+    /// Cost per nat of a word's misfit after the one before; 0 scores words
+    /// alone (and needs no word-pair counts).
+    pub fit: f32,
     pub word_penalty: f32,
-    pub bigrams: bool,
     pub shortlist: usize,
     /// With bigrams, partial matches kept per position.
     pub beam: usize,
@@ -364,9 +367,9 @@ impl MishearApp {
         let search_config = SearchConfig {
             results: s.results.max(1),
             bound: s.within.unwrap_or(2.0),
-            lm_weight: s.lm_weight,
+            commonness: s.commonness,
+            fit: s.fit,
             word_penalty: s.word_penalty,
-            bigrams: s.bigrams,
             shortlist: s.shortlist,
             beam: s.beam.max(1),
             distinct_sounds: s.distinct_sounds,
@@ -548,9 +551,9 @@ pub fn defaults() -> DefaultsDto {
         search: SearchDto {
             results: mishear.search.results,
             within: None,
-            lm_weight: search.lm_weight,
+            commonness: search.commonness,
+            fit: search.fit,
             word_penalty: search.word_penalty,
-            bigrams: search.bigrams,
             shortlist: search.shortlist,
             beam: search.beam,
             distinct_sounds: search.distinct_sounds,

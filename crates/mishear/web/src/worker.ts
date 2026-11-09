@@ -87,7 +87,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
     }
     if (!app) throw new Error('the engine is not loaded yet');
     if (message.type === 'run') {
-      if (message.request.search.bigrams) await ensureBigrams();
+      if (message.request.search.fit > 0) await ensureBigrams();
       let rebuildMs = 0;
       if (!sameLexicon(message.lexicon, lexicon)) {
         const t = performance.now();
@@ -106,7 +106,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
         rebuildMs,
         memoryMb: memory ? memory.buffer.byteLength / 1e6 : 0,
         notice:
-          message.request.search.bigrams && bigrams === 'missing'
+          message.request.search.fit > 0 && bigrams === 'missing'
             ? 'No word-pair counts (run crates/mishear/scripts/bigrams.py, then npm run data): scoring words alone.'
             : undefined,
       });

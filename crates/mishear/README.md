@@ -142,10 +142,14 @@ of the input. Its cost adds up three things:
 
 - **Phonetic cost.** A weighted edit distance whose substitution costs come
   from mime-reader's vowel and consonant distance engines, on a 0–1 scale.
-- **Language-model cost.** `0.005 × −ln P(word | previous word)` plus `0.4`
-  per word, from word-pair counts in Google Books fiction,
-  Dirichlet-smoothed toward wordfreq's frequencies (see "Bigrams" below).
-  With `--unigram`, `P(word)` from wordfreq alone.
+- **Language-model cost.** Per word, `0.4` plus two parts, floored at zero
+  (see "Commonness and fit" below):
+  - **commonness**, `0.005 × −ln P(word)`, with `P` from wordfreq: how rare
+    the word is;
+  - **fit**, `0.005 × ln(P(word) / P(word | previous word))`, from word-pair
+    counts in Google Books fiction: how much less likely the word is after
+    the one before than on its own (a saving when they go together).
+    `--unigram` (fit 0) leaves it out.
 - **Extra costs.** The mishearing engine charges 0.9 for each word the
   original line contains, and a fifth of that for function words; 0.2 for
   each word sharing a stem with the line's (`--root`); 0.2 for each of the
@@ -176,7 +180,9 @@ example names its own.
 
 | flag | default | what it trades |
 |---|---|---|
-| `--lm` | 0.005 | sound against word frequency |
+| `--commonness` | 0.005 | sound against how common each word is |
+| `--fit` | 0.005 | sound against how well each word follows the one before (0: words alone, exactly) |
+| `--lm` | – | sets `--commonness` and `--fit` both: the single weight they replaced |
 | `--word-penalty` | 0.4 | many short words against few long ones |
 | `--pronunciations first\|all` | all | more ways to hear a word, against more chance matches |
 | `--bigram-prior` | 1000 | with bigrams: trusting word pairs (small) against unigram frequency (large) |
@@ -253,12 +259,34 @@ ones a hearing can contain:
 - **Pruning by information beats pruning by count**, slightly: a pair's
   information is `c·ln(1 + c/(μ·P(w)))`, how much its count beats backing
   off.
-- **Where the gain shows.** At the default `--lm 0.005` the model adds only
-  about 0.01–0.03 per word, so bigrams change about a third of the hearings
+- **Where the gain shows.** At the default fit (0.005) the pairs add only
+  about 0.01–0.03 per word, so they change about a third of the hearings
   and rarely the best; the hearings' word pairs are mostly unseen ("toothy
-  rub"), as they should be. At `--lm 0.05`, two thirds change, toward
-  pairs the counts know: "velodrome watchful of people", "societies was
-  never scene", "case this guy".
+  rub"), as they should be. At `--lm 0.05` (commonness and fit both), two
+  thirds change, toward pairs the counts know: "velodrome watchful of
+  people", "societies was never scene", "case this guy".
+
+### Commonness and fit
+
+With word pairs, a word's surprisal after the one before splits in two:
+`−ln P(w | v) = −ln P(w) + ln(P(w) / P(w | v))`, how rare the word is plus
+how badly it fits. "guy" costs 8.29 nats alone; after "this", which makes
+it 16 times likelier, 5.50 (a fit of −2.79); after "thus", 11.19 (+2.90).
+One weight used to scale the sum, so asking for pairs that go together
+also pushed toward common words: at 0.3, hearings collapsed into
+"information" and "scientifically". `--commonness` and `--fit` weight the
+two apart; equal weights give the old costs exactly (a test checks this).
+
+"kiss the sky" at `--commonness 0.005`: fit 0 hears "case thus chi"
+("thus" is closer in sound); 0.05, "case this guy"; 0.2, "gives us gae",
+"tis thy sty": pairs that go together, of rare words.
+
+A good fit is a saving, so a word's penalty + commonness + fit could fall
+below zero. It is floored there: a fit can make a word free, never pay for
+it, which would reward stuffing in well-fitting words and break the
+search's bounds. At the default word penalty (0.4) the floor only bites at
+large fit weights on strong pairs. With the floor, the bigram search still
+matches brute force on a small lexicon (a test checks this too).
 
 **Packed.** As text the counts are 514 MB, and compress only to 134–167 MB.
 `examples/pack_bigrams.rs` keeps the pairs of lexicon words and writes each
@@ -544,7 +572,7 @@ These use public-domain lines from `data/echo/public` (`examples --public
 - **Fluency.** Scoring words alone (`--unigram`) makes hearings word salad
   (or poetry). Bigrams, the default, add word-pair counts from Google Books,
   which help locally ("guess this guy") but can't see past the previous
-  word ("the tomatoes was never sign"), and at the default `--lm` they
+  word ("the tomatoes was never sign"), and at the default `--fit` they
   weigh little. A longer-range model, such
   as a trigram model or a small neural rescorer over the top 50, would go
   further. The backoff could also try Kneser–Ney's continuation counts

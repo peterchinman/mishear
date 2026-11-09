@@ -36,9 +36,16 @@ SEARCH OPTIONS
   --within X         every match costing at most X (otherwise the exact top N)
   --novelty F        mishear/hear/examples: cost per word shared with the line
                      (default 0.9; function words a fifth of that)
-  --lm F             cost per nat of word surprisal, −ln P(word | previous):
-                     how much common words are preferred (default 0.005; 0
-                     ignores frequency)
+  --commonness F     cost per nat of a word's rarity, −ln P(word): how much
+                     common words are preferred (default 0.005; 0 ignores
+                     frequency)
+  --fit F            cost per nat of a word's misfit after the one before,
+                     ln(P(word) / P(word | previous)), a saving when they go
+                     together: how much hearings' word pairs must make sense
+                     (default 0.005; 0 scores words alone, exactly). A word's
+                     penalty + commonness + fit is floored at zero.
+  --lm F             sets --commonness and --fit both (the single weight
+                     they replace)
   --word-penalty F   cost per word: higher prefers fewer, longer words
                      (default 0.4)
   --pronunciations first|all
@@ -68,11 +75,11 @@ SEARCH OPTIONS
                      sound the same are merged, keeping the cheapest
                      spelling
   --vocab N          lexicon size: most frequent words (default 50000)
-  --unigram          score each word alone, not by the previous word too:
-                     exact and faster, less fluent. By default words are
-                     scored with word-pair counts from Google Books fiction
-                     (data/bigrams-en.bin; see scripts/google_bigrams.sh), or
-                     alone if that file is missing.
+  --unigram          --fit 0, whatever else is given: score each word alone,
+                     exactly and faster. Otherwise fit uses word-pair counts
+                     from Google Books fiction (data/bigrams-en.bin; see
+                     scripts/google_bigrams.sh), or is 0 if that file is
+                     missing.
   --bigrams          require the word-pair counts (an error without them)
   --beam N           with bigrams, partial hearings kept per position: wider
                      is closer to exact, and slower (default 100)
@@ -95,7 +102,9 @@ DEFORMATION OPTIONS (combine freely; applied in order)
   --seed N           which sites a partial rate picks (default 0)
 
 SWEEP AND EVAL OPTIONS
-  --lm-values A,B,…        (default: --lm)
+  --lm-values A,B,…        sets commonness and fit both
+  --commonness-values A,B,… (default: --commonness)
+  --fit-values A,B,…       (default: --fit)
   --penalty-values A,B,…   (default: --word-penalty)
   --pron-values first,all  (default: --pronunciations)
   --stress-values A,B,…    (default: --stress-mismatch)
@@ -117,13 +126,15 @@ struct Options {
     results: usize,
     within: Option<f32>,
     novelty: f32,
-    lm: f32,
+    commonness: f32,
+    fit: f32,
     vocab: usize,
     deformation: Deformation,
     lines: usize,
     line_seed: u64,
     all_words: bool,
-    bigrams: bool,
+    /// Fit 0, whatever else is given.
+    unigram: bool,
     /// The word-pair counts were asked for, so their absence is an error.
     bigrams_required: bool,
     bigram_file: Option<PathBuf>,
@@ -134,6 +145,8 @@ struct Options {
     bigram_prior: f32,
     function_share: f32,
     lm_values: Option<Vec<f32>>,
+    commonness_values: Option<Vec<f32>>,
+    fit_values: Option<Vec<f32>>,
     penalty_values: Option<Vec<f32>>,
     pron_values: Option<Vec<bool>>,
     stress_mismatch: f32,
@@ -161,13 +174,14 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         results: d.search.results,
         within: None,
         novelty: d.novelty,
-        lm: d.search.lm_weight,
+        commonness: d.search.commonness,
+        fit: d.search.fit,
         vocab: 50_000,
         deformation: Deformation::new(""),
         lines: 6,
         line_seed: 1,
         all_words: false,
-        bigrams: d.search.bigrams,
+        unigram: false,
         bigrams_required: false,
         bigram_file: None,
         beam: d.search.beam,
@@ -177,6 +191,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         bigram_prior: mishear::lexicon::BIGRAM_PRIOR,
         function_share: d.function_word_share,
         lm_values: None,
+        commonness_values: None,
+        fit_values: None,
         penalty_values: None,
         pron_values: None,
         stress_mismatch: 0.0,
@@ -202,7 +218,16 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "-n" => o.results = value("-n")?.parse().map_err(|e| format!("-n: {e}"))?,
             "--within" => o.within = Some(number(value("--within")?)?),
             "--novelty" => o.novelty = number(value("--novelty")?)?,
-            "--lm" => o.lm = number(value("--lm")?)?,
+            "--lm" => {
+                let w = number(value("--lm")?)?;
+                (o.commonness, o.fit) = (w, w);
+            }
+            "--commonness" => o.commonness = number(value("--commonness")?)?,
+            "--fit" => o.fit = number(value("--fit")?)?,
+            "--commonness-values" => {
+                o.commonness_values = Some(numbers(&value("--commonness-values")?)?)
+            }
+            "--fit-values" => o.fit_values = Some(numbers(&value("--fit-values")?)?),
             "--word-penalty" => o.word_penalty = number(value("--word-penalty")?)?,
             "--bigram-prior" => o.bigram_prior = number(value("--bigram-prior")?)?,
             "--function-share" => o.function_share = number(value("--function-share")?)?,
@@ -252,11 +277,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--vowels" => steps.push(StepSpec::Vowels(value("--vowels")?)),
             "--intensity" => intensity = number(value("--intensity")?)?,
             "--all-words" => o.all_words = true,
-            "--bigrams" => {
-                o.bigrams = true;
-                o.bigrams_required = true;
-            }
-            "--unigram" => o.bigrams = false,
+            "--bigrams" => o.bigrams_required = true,
+            "--unigram" => o.unigram = true,
             "--beam" => {
                 o.beam = value("--beam")?
                     .parse()
@@ -264,7 +286,6 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             }
             "--bigram-file" => {
                 o.bigram_file = Some(PathBuf::from(value("--bigram-file")?));
-                o.bigrams = true;
                 o.bigrams_required = true;
             }
             "--seed" => {
@@ -328,7 +349,13 @@ fn engine_with(o: &Options, vocab: usize, all_pronunciations: bool) -> Result<En
         all_pronunciations,
         common.as_ref(),
     )?;
-    if o.bigrams {
+    // Some grid point may score fit, even if the defaults don't.
+    let wants_fit = !o.unigram
+        && (o.fit > 0.0
+            || [&o.fit_values, &o.lm_values]
+                .iter()
+                .any(|v| v.as_ref().is_some_and(|v| v.iter().any(|&f| f > 0.0))));
+    if wants_fit || o.bigrams_required {
         // The packed counts, else the text ones.
         let path = o.bigram_file.clone().unwrap_or_else(|| {
             let packed = crate_path("data/bigrams-en.bin");
@@ -368,9 +395,9 @@ fn search_config(o: &Options) -> SearchConfig {
     SearchConfig {
         results: o.results,
         bound: o.within.unwrap_or(2.0),
-        lm_weight: o.lm,
+        commonness: o.commonness,
+        fit: if o.unigram { 0.0 } else { o.fit },
         word_penalty: o.word_penalty,
-        bigrams: o.bigrams,
         beam: o.beam,
         distinct_sounds: !o.all_spellings,
         ..SearchConfig::default()
@@ -597,8 +624,10 @@ fn grid(o: &Options) -> Vec<Options> {
         .collect();
     // Each axis multiplies the grid, the first outermost.
     type Axis = (Option<Vec<f32>>, fn(&mut Options, f32));
-    let axes: [Axis; 8] = [
-        (o.lm_values.clone(), |o, v| o.lm = v),
+    let axes: [Axis; 10] = [
+        (o.lm_values.clone(), |o, v| (o.commonness, o.fit) = (v, v)),
+        (o.commonness_values.clone(), |o, v| o.commonness = v),
+        (o.fit_values.clone(), |o, v| o.fit = v),
         (o.penalty_values.clone(), |o, v| o.word_penalty = v),
         (o.stress_values.clone(), |o, v| o.stress_mismatch = v),
         (o.swap_values.clone(), |o, v| o.swap = v),
@@ -625,8 +654,9 @@ fn grid(o: &Options) -> Vec<Options> {
 
 fn label(o: &Options) -> String {
     format!(
-        "lm {:<4} pen {:<4} {:<5} stress {:<3} swap {:<3} nov {:<3} root {:<3} cross {:<3} var {:<3}",
-        o.lm,
+        "com {:<5} fit {:<5} pen {:<4} {:<5} stress {:<3} swap {:<3} nov {:<3} root {:<3} cross {:<3} var {:<3}",
+        o.commonness,
+        if o.unigram { 0.0 } else { o.fit },
         o.word_penalty,
         if o.all_pronunciations { "all" } else { "first" },
         o.stress_mismatch,

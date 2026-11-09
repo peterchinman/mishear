@@ -55,26 +55,37 @@ const SEARCH_KNOBS: Knob[] = [
   },
   {
     type: 'number',
-    key: 'lm_weight',
-    label: 'word-prior weight',
-    hint: 'Cost per nat of a word’s surprisal, −ln P(word). 0: every word is as likely as any other (rarer words, odder hearings); higher: common words win.',
+    key: 'commonness',
+    label: 'commonness',
+    hint: 'Cost per nat of a word’s rarity, −ln P(word): how much common words are preferred. 0: a rare word costs no more than “the”; higher: common words win (at 0.3, hearings collapse into words like “information”).',
+    min: 0,
+    max: 0.5,
+    step: 0.005,
+  },
+  {
+    type: 'number',
+    key: 'fit',
+    label: 'fit',
+    hint: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), from Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
     min: 0,
     max: 0.5,
     step: 0.005,
   },
   { type: 'number', key: 'word_penalty', label: 'word penalty', hint: 'Cost per word. Higher prefers fewer, longer words.', min: 0, max: 2, step: 0.01 },
   {
-    type: 'bool',
-    key: 'bigrams',
-    label: 'bigrams',
-    hint: 'Score each word given the one before, from word-pair counts in Google Books fiction (21.6M pairs, a 29 MB download). More fluent, but approximate (exact only up to the shortlist and the beam) and slower. Their pull is the word-prior weight’s: at 0.005 they change little, at 0.05 a lot. Off: each word alone (unigram), and exact.',
+    type: 'number',
+    key: 'shortlist',
+    label: 'bigram shortlist',
+    hint: 'With fit above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
+    min: 5,
+    max: 200,
+    step: 1,
   },
-  { type: 'number', key: 'shortlist', label: 'bigram shortlist', hint: 'Words kept per input span when bigrams are on.', min: 5, max: 200, step: 1 },
   {
     type: 'number',
     key: 'beam',
     label: 'bigram beam',
-    hint: 'With bigrams, partial hearings kept per position. Wider is closer to exact and slower. At a small word-prior weight, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
+    hint: 'With fit above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small fit, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
     min: 10,
     max: 400,
     step: 10,
@@ -269,7 +280,8 @@ function stepDto(step: Step): StepDto {
 // ---------------------------------------------------------------- state ----
 
 interface State {
-  /** The saved format: 3 marks settings saved as changes from the defaults. */
+  /** The saved format: 3 and up save settings as changes from the defaults;
+   * 4 has commonness and fit. */
   v?: number;
   mode: Mode;
   text: string;
@@ -309,7 +321,7 @@ function defaultState(): State {
     cost: { ...defaults.cost },
     lexicon: { ...defaults.lexicon },
     autoRun: true,
-    sweepKnob: 'search.lm_weight',
+    sweepKnob: 'search.fit',
     sweepValues: '0, 0.02, 0.05, 0.1, 0.2',
     soundsOpen: true,
   };
@@ -331,10 +343,22 @@ function readSaved(): Partial<State> | null {
 /** Earlier formats always applied their steps, and defaulted to an Irish
  * accent: drop that default, and keep anything else switched on. */
 function upgrade(saved: Partial<State> | null): Partial<State> | null {
-  if (!saved || saved.v === 3) return saved;
-  const steps = saved.steps ?? [];
-  const oldDefault = steps.length === 1 && steps[0].kind === 'accent' && steps[0].name === 'irish';
-  return { ...saved, v: 3, steps: oldDefault ? [] : steps, deform: !oldDefault && steps.length > 0 };
+  if (!saved) return saved;
+  if ((saved.v ?? 0) < 3) {
+    const steps = saved.steps ?? [];
+    const oldDefault = steps.length === 1 && steps[0].kind === 'accent' && steps[0].name === 'irish';
+    saved = { ...saved, v: 3, steps: oldDefault ? [] : steps, deform: !oldDefault && steps.length > 0 };
+  }
+  if (saved.v === 3) {
+    // Format 3 had one word-prior weight (for both commonness and fit) and
+    // a bigrams switch (now fit 0).
+    const { lm_weight, bigrams, ...search } = (saved.search ?? {}) as Record<string, unknown>;
+    if (typeof lm_weight === 'number') Object.assign(search, { commonness: lm_weight, fit: lm_weight });
+    if (bigrams === false) search.fit = 0;
+    const sweepKnob = saved.sweepKnob === 'search.lm_weight' ? 'search.fit' : saved.sweepKnob;
+    saved = { ...saved, v: 4, search: search as unknown as SearchDto, sweepKnob };
+  }
+  return saved;
 }
 
 function loadState(): State {
@@ -373,7 +397,7 @@ function savedState(): Partial<State> {
   );
   return {
     ...top,
-    v: 3,
+    v: 4,
     deformation: changed(state.deformation, base.deformation) as State['deformation'],
     search: changed(state.search, base.search) as unknown as SearchDto,
     cost: changed(state.cost, base.cost) as unknown as CostDto,

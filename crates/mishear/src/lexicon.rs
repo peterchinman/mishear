@@ -408,6 +408,19 @@ impl Lexicon {
         }
     }
 
+    /// How much less likely `word` is after `previous` than on its own,
+    /// in nats: `ln(P(word) / P(word | previous))`, negative when it goes
+    /// with the one before. 0 at the line's start, or without bigrams.
+    pub fn misfit(&self, previous: Option<WordId>, word: WordId) -> f32 {
+        self.surprisal_after(previous, word) - self.surprisal[word as usize]
+    }
+
+    /// The least [`Self::misfit`] over every context (at most 0, the
+    /// line's start).
+    pub fn best_misfit(&self, word: WordId) -> f32 {
+        self.best_surprisal(word) - self.surprisal[word as usize]
+    }
+
     /// The cheapest [`Self::surprisal_after`] over every context: a lower
     /// bound the search prunes with.
     pub fn best_surprisal(&self, word: WordId) -> f32 {

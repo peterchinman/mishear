@@ -5,8 +5,10 @@
 //! span of it. Its cost is the sum, over words, of
 //! - the phonetic edit cost of the word's pronunciation against its span
 //!   ([`CostModel`]);
-//! - `lm_weight × −ln P(word)` (common words are cheap) plus
-//!   `word_penalty`;
+//! - [`word_cost`]: `word_penalty`, plus `commonness × −ln P(word)` (common
+//!   words are cheap), plus, with bigrams, `fit × ln(P(word) / P(word |
+//!   previous word))` (words that go with the one before are cheap), floored
+//!   at zero;
 //! - any extra cost the caller puts on particular words;
 //! - any cost the caller puts on a word boundary at particular positions.
 //!
@@ -46,8 +48,15 @@ pub struct SearchConfig {
     pub results: usize,
     /// Only matches costing at most this are returned (exactly).
     pub bound: f32,
-    /// Cost per nat of a word's surprisal (`−ln P(word)`).
-    pub lm_weight: f32,
+    /// Cost per nat of a word's rarity, `−ln P(word)`: how much common words
+    /// are preferred.
+    pub commonness: f32,
+    /// Cost per nat of a word's misfit after the previous word,
+    /// `ln(P(word) / P(word | previous))`: negative (a saving) when the
+    /// word goes with the one before, positive when it doesn't. 0 scores
+    /// words alone, and the search is exact; above 0 it uses the lexicon's
+    /// word-pair counts, when it has them.
+    pub fit: f32,
     /// Cost per word.
     pub word_penalty: f32,
     /// Extra cost per word, e.g. for words the input already contains.
@@ -57,11 +66,10 @@ pub struct SearchConfig {
     /// nothing. Depending only on where a word starts, it leaves the search
     /// exact.
     pub boundary_cost: Vec<f32>,
-    /// Score words by the previous word too, when the lexicon has bigrams
-    /// (on by default). The search is then exact only up to its per-span
-    /// shortlist of `shortlist` words (the best word for a span depends on
-    /// its predecessor) and its `beam` of partial matches per position.
-    pub bigrams: bool,
+    /// With bigrams (see [`Self::bigrams`]) the search is exact only up to
+    /// its per-span shortlist of `shortlist` words (the best word for a span
+    /// depends on its predecessor) and its `beam` of partial matches per
+    /// position.
     pub shortlist: usize,
     /// With bigrams, how many partial matches pass 2 keeps per position:
     /// wider is closer to exact, and slower.
@@ -71,16 +79,50 @@ pub struct SearchConfig {
     pub distinct_sounds: bool,
 }
 
+impl SearchConfig {
+    /// Whether words are scored by the word before them too: when `fit` is
+    /// above 0 and `lexicon` has word-pair counts.
+    pub fn bigrams(&self, lexicon: &Lexicon) -> bool {
+        self.fit > 0.0 && lexicon.has_bigrams()
+    }
+}
+
+/// What `word` costs after `previous` (none at the line's start), its sound
+/// aside: the word penalty, its commonness and its fit, floored at zero. A
+/// good fit can make a word free but not pay for it: negative costs would
+/// reward stuffing in well-fitting words, and break the search's bounds.
+pub fn word_cost(
+    lexicon: &Lexicon,
+    config: &SearchConfig,
+    previous: Option<WordId>,
+    word: WordId,
+) -> f32 {
+    let mut cost = config.word_penalty + config.commonness * lexicon.surprisal(word);
+    if config.bigrams(lexicon) {
+        cost += config.fit * lexicon.misfit(previous, word);
+    }
+    cost.max(0.0)
+}
+
+/// The least [`word_cost`] over every previous word: a lower bound.
+pub fn least_word_cost(lexicon: &Lexicon, config: &SearchConfig, word: WordId) -> f32 {
+    let mut cost = config.word_penalty + config.commonness * lexicon.surprisal(word);
+    if config.bigrams(lexicon) {
+        cost += config.fit * lexicon.best_misfit(word);
+    }
+    cost.max(0.0)
+}
+
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             results: 10,
             bound: 4.0,
-            lm_weight: 0.005,
+            commonness: 0.005,
+            fit: 0.005,
             word_penalty: 0.4,
             extra: HashMap::new(),
             boundary_cost: Vec::new(),
-            bigrams: true,
             shortlist: 30,
             beam: 100,
             distinct_sounds: true,
@@ -159,7 +201,7 @@ pub fn search(
 /// they did in pass 1.
 pub fn shortlist(lexicon: &Lexicon, config: &SearchConfig, penalized: usize) -> usize {
     let keep = config.results.max(1);
-    let base = if config.bigrams && lexicon.has_bigrams() {
+    let base = if config.bigrams(lexicon) {
         keep.max(config.shortlist)
     } else {
         keep
@@ -192,18 +234,10 @@ pub fn lattice(
     keep: usize,
 ) -> Lattice {
     let n = input.len();
-    let bigrams = config.bigrams && lexicon.has_bigrams();
     let extra = |w: WordId| config.extra.get(&w).copied().unwrap_or(0.0);
     // With bigrams, the best case over every predecessor: a lower bound.
     let word_cost: Vec<f32> = (0..lexicon.len() as WordId)
-        .map(|w| {
-            let surprisal = if bigrams {
-                lexicon.best_surprisal(w)
-            } else {
-                lexicon.surprisal(w)
-            };
-            config.lm_weight * surprisal + config.word_penalty + extra(w)
-        })
+        .map(|w| least_word_cost(lexicon, config, w) + extra(w))
         .collect();
     let subtree_min = subtree_min_cost(lexicon, &word_cost);
     let mut lattice = Lattice {
@@ -298,7 +332,7 @@ pub fn paths(
 ) -> Vec<Match> {
     let edges = &lattice.edges;
     let n = edges.len();
-    let bigrams = config.bigrams && lexicon.has_bigrams();
+    let bigrams = config.bigrams(lexicon);
     let keep = config.results.max(1);
     let bound = config.bound.min(lattice.bound);
     let extra = |w: WordId| config.extra.get(&w).copied().unwrap_or(0.0);
@@ -350,8 +384,7 @@ pub fn paths(
                 // Every extension by this edge costs at least this: with
                 // bigrams, pass 1 charged the word's cheapest context.
                 let least = edge.total + boundary + penalty;
-                let fixed =
-                    edge.phonetic + config.word_penalty + extra(edge.word) + boundary + penalty;
+                let fixed = edge.phonetic + extra(edge.word) + boundary + penalty;
                 if bigrams {
                     after.clear();
                     after.resize(last_words[s].len(), f32::NAN);
@@ -367,8 +400,7 @@ pub fn paths(
                         if after[slot].is_nan() {
                             let previous = last_words[s][slot];
                             let previous = (previous != WordId::MAX).then_some(previous);
-                            after[slot] = fixed
-                                + config.lm_weight * lexicon.surprisal_after(previous, edge.word);
+                            after[slot] = fixed + word_cost(lexicon, config, previous, edge.word);
                         }
                         after[slot]
                     } else {
@@ -792,7 +824,7 @@ mod tests {
                         .fold(f32::INFINITY, f32::min);
                     span_cost.insert(
                         (start, end, w),
-                        phonetic + config.lm_weight * lexicon.surprisal(w) + config.word_penalty,
+                        phonetic + word_cost(lexicon, config, None, w),
                     );
                 }
             }
@@ -871,7 +903,7 @@ mod tests {
                 let config = SearchConfig {
                     results: 5,
                     bound,
-                    bigrams: false,
+                    fit: 0.0,
                     boundary_cost,
                     ..SearchConfig::default()
                 };
@@ -897,6 +929,145 @@ mod tests {
         }
     }
 
+    /// [`tiny`] with word-pair counts: "this guy" and "the sky" go together.
+    fn tiny_with_pairs() -> Lexicon {
+        let mut lexicon = tiny();
+        lexicon
+            .parse_bigrams(
+                "the\t*\t1000\nthe\tsky\t300\nthis\t*\t500\nthis\tguy\t400\n\
+                 kiss\t*\t100\nkiss\tthe\t60\ncase\t*\t80\ncase\tthis\t20\n",
+                100.0,
+            )
+            .unwrap();
+        lexicon
+    }
+
+    #[test]
+    fn commonness_and_fit_split_the_old_weight() {
+        let lexicon = tiny_with_pairs();
+        let id = |w: &str| lexicon.id(w).unwrap();
+        let (this, guy, the) = (id("this"), id("guy"), id("the"));
+        // Equal weights: the word's surprisal after the previous word, as
+        // the single weight scored it.
+        let equal = SearchConfig {
+            commonness: 0.05,
+            fit: 0.05,
+            ..SearchConfig::default()
+        };
+        for previous in [None, Some(this), Some(the)] {
+            let old = equal.word_penalty + 0.05 * lexicon.surprisal_after(previous, guy);
+            assert!((word_cost(&lexicon, &equal, previous, guy) - old).abs() < 1e-5);
+        }
+        // "guy" fits after "this", not after "the".
+        assert!(lexicon.misfit(Some(this), guy) < 0.0 && lexicon.misfit(Some(the), guy) > 0.0);
+        // Fit 0: words alone, whatever came before.
+        let alone = SearchConfig {
+            fit: 0.0,
+            ..equal.clone()
+        };
+        assert!(!alone.bigrams(&lexicon));
+        assert_eq!(
+            word_cost(&lexicon, &alone, Some(this), guy),
+            word_cost(&lexicon, &alone, Some(the), guy)
+        );
+        // A strong fit can make a word free, never less.
+        let eager = SearchConfig {
+            fit: 10.0,
+            ..equal.clone()
+        };
+        assert_eq!(word_cost(&lexicon, &eager, Some(this), guy), 0.0);
+        // The lower bound holds in every context.
+        for config in [&equal, &alone, &eager] {
+            for w in 0..lexicon.len() as WordId {
+                for v in (0..lexicon.len() as WordId).map(Some).chain([None]) {
+                    assert!(
+                        least_word_cost(&lexicon, config, w)
+                            <= word_cost(&lexicon, config, v, w) + 1e-6
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigram_search_matches_brute_force() {
+        // With a shortlist and a beam wider than the lexicon, the bigram
+        // search is exact: check it, floor and lower bounds included.
+        let lexicon = tiny_with_pairs();
+        let cost = CostModel::default();
+        let pron = |w: WordId| -> Vec<Ph> {
+            Ph::parse_all(match lexicon.word(w) {
+                "kiss" => "K IH1 S",
+                "the" => "DH AH0",
+                "this" => "DH IH1 S",
+                "sky" => "S K AY1",
+                "guy" => "G AY1",
+                _ => "K EY1 S",
+            })
+            .unwrap()
+        };
+        for (commonness, fit) in [(0.05, 0.05), (0.0, 0.3), (0.05, 2.0)] {
+            for (input, bound) in [
+                ("K IH1 S DH AH0", 4.0),
+                ("K EY1 S DH IH1 S", 4.0),
+                ("G AY1 S K AY1", 4.0),
+            ] {
+                let input = Ph::parse_all(input).unwrap();
+                let config = SearchConfig {
+                    results: 5,
+                    bound,
+                    commonness,
+                    fit,
+                    ..SearchConfig::default()
+                };
+                let n = input.len();
+                let mut best: HashMap<Vec<WordId>, f32> = HashMap::new();
+                for cuts in 0u32..(1 << (n - 1)) {
+                    let mut spans = Vec::new();
+                    let mut start = 0;
+                    for i in 1..n {
+                        if cuts & (1 << (i - 1)) != 0 {
+                            spans.push(start..i);
+                            start = i;
+                        }
+                    }
+                    spans.push(start..n);
+                    let words = lexicon.len();
+                    for choice in 0..words.pow(spans.len() as u32) {
+                        let (mut c, mut total, mut seq) = (choice, 0.0, Vec::new());
+                        let mut previous = None;
+                        for span in &spans {
+                            let w = (c % words) as WordId;
+                            c /= words;
+                            total += cost.distance(&input[span.clone()], &pron(w))
+                                + word_cost(&lexicon, &config, previous, w);
+                            previous = Some(w);
+                            seq.push(w);
+                        }
+                        let entry = best.entry(seq).or_insert(f32::INFINITY);
+                        *entry = entry.min(total);
+                    }
+                }
+                let mut want: Vec<f32> = best.into_values().filter(|&c| c <= bound).collect();
+                want.sort_by(f32::total_cmp);
+                want.truncate(5);
+                let (found, _) = search(&input, &lexicon, &cost, &config);
+                let got: Vec<f32> = found.iter().map(|m| m.cost).collect();
+                assert_eq!(
+                    got.len(),
+                    want.len(),
+                    "{commonness} {fit}: {got:?} vs {want:?}"
+                );
+                for (g, w) in got.iter().zip(&want) {
+                    assert!(
+                        (g - w).abs() < 1e-4,
+                        "{commonness} {fit}: {got:?} vs {want:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_swap_is_one_edit() {
         let lexicon = tiny();
@@ -908,7 +1079,7 @@ mod tests {
         let config = SearchConfig {
             results: 1,
             bound: 3.0,
-            bigrams: false,
+            fit: 0.0,
             ..SearchConfig::default()
         };
         let (found, _) = search(&input, &lexicon, &swapping, &config);
@@ -926,7 +1097,7 @@ mod tests {
         let config = SearchConfig {
             results: 3,
             bound: 0.5,
-            bigrams: false,
+            fit: 0.0,
             ..SearchConfig::default()
         };
         let (found, stats) = best_matches(&input, &lexicon, &cost, &config, 1.5, 50.0);

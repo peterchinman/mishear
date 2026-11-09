@@ -573,7 +573,7 @@ mod tests {
             variety: 0.0,
             ..MishearConfig::default()
         };
-        config.search.bigrams = false;
+        config.search.fit = 0.0;
         config.search.distinct_sounds = false;
         config.search.results = 20;
         config
@@ -665,7 +665,7 @@ mod tests {
             let input = Ph::parse_all(text).unwrap();
             let settings = [(0.3, 0.0), (1.0, 0.0), (1.0, 0.5), (3.0, 0.0), (0.5, 1.0)];
             let weights = [(0.05, 0.1), (0.005, 0.4), (0.0, 0.0)];
-            for ((v, root), (lm_weight, word_penalty)) in settings
+            for ((v, root), (commonness, word_penalty)) in settings
                 .iter()
                 .flat_map(|s| weights.iter().map(move |w| (*s, *w)))
             {
@@ -677,8 +677,8 @@ mod tests {
                 let config = SearchConfig {
                     results: 6,
                     bound: 0.5,
-                    bigrams: false,
-                    lm_weight,
+                    fit: 0.0,
+                    commonness,
                     word_penalty,
                     ..SearchConfig::default()
                 };
