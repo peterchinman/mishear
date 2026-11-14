@@ -101,9 +101,12 @@ SEARCH OPTIONS
                      scowl: SCOWL's words up to --scowl-level, data/SCOWL
                        (names, places, days and months; no abbreviations);
                      none: every word.
-                     scowl and none drop single letters but 'a' and 'i', and
+                     scowl and none drop single letters but 'a' and 'i';
                      abbreviations: words said as their letters ('tv', 'uk')
-                     or spelled without a vowel ('sr', 'mr', 'lbs')
+                     or spelled without a vowel ('sr', 'lbs'), keeping a
+                     clipped word only as written ('corp', not
+                     'corporation'); and fragments and foreign function
+                     words ('ve', 'ing', 'le', 'der', 'que')
   --scowl-level N    with --word-list scowl, SCOWL's size level kept: 10 the
                      most common words ... 80 rare ones (default 60)
   --all-words        --word-list none

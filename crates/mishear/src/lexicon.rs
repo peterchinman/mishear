@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use mime_reader::{InflectionRule, PronouncingDictionary, inflection_bases};
+use mime_reader::{InflectionRule, Phoneme, PronouncingDictionary, inflection_bases};
 
 use crate::bigrams::{BigramTable, dequantize};
 use crate::phone::Ph;
@@ -246,14 +246,16 @@ pub fn parse_frequencies(text: &str) -> Result<Vec<Frequency>, String> {
 ///   places, days and months included, abbreviations not.
 /// - Every word ([`Self::any`]).
 ///
-/// SCOWL and every-word lists drop single letters but "a" and "i", and
-/// abbreviations ("tv", "sr"; see [`abbreviation`]).
+/// SCOWL and every-word lists drop single letters but "a" and "i", words
+/// that are never words ([`not_a_word`]: "sr", "le"), and pronunciations
+/// that read a word as an abbreviation ([`abbreviated`]: "tv", "etc" as et
+/// cetera), keeping a word read as written ("corp" as K AO1 R P).
 pub struct CommonWords {
     /// Each listed word's level; `None`: every word.
     words: Option<HashMap<String, u8>>,
     max_level: u8,
     single_letters: &'static [&'static str],
-    no_letter_spellings: bool,
+    no_abbreviations: bool,
 }
 
 /// What follows the apostrophe of a contraction or possessive: "it's",
@@ -289,7 +291,7 @@ impl CommonWords {
             ),
             max_level: u8::MAX,
             single_letters: &["a", "i", "o"],
-            no_letter_spellings: false,
+            no_abbreviations: false,
         }
     }
 
@@ -318,7 +320,7 @@ impl CommonWords {
             words: Some(words),
             max_level: DEFAULT_SCOWL_LEVEL,
             single_letters: &["a", "i"],
-            no_letter_spellings: true,
+            no_abbreviations: true,
         })
     }
 
@@ -328,7 +330,7 @@ impl CommonWords {
             words: None,
             max_level: u8::MAX,
             single_letters: &["a", "i"],
-            no_letter_spellings: true,
+            no_abbreviations: true,
         }
     }
 
@@ -343,9 +345,10 @@ impl CommonWords {
         self.max_level = level;
     }
 
-    /// Whether abbreviations are to go too (see [`abbreviation`]).
-    pub fn rejects_letter_spellings(&self) -> bool {
-        self.no_letter_spellings
+    /// Whether [`not_a_word`]s and [`abbreviated`] pronunciations are to go
+    /// too.
+    pub fn rejects_abbreviations(&self) -> bool {
+        self.no_abbreviations
     }
 
     fn listed(&self, word: &str) -> bool {
@@ -382,53 +385,95 @@ const VOWELLESS_WORDS: [&str; 12] = [
     "hmm", "hm", "mm", "mmm", "shh", "sh", "psst", "brr", "pfft", "tsk", "grr", "zzz",
 ];
 
-/// Whether `word` is an abbreviation: said as its letters ("tv"; see
-/// [`spelled_as_letters`]), or spelled without a vowel letter but said as
-/// the word it stands for ("sr", senior; "mr", "lbs", "blvd").
-/// Interjections such as "hmm" and "shh" aren't.
-pub fn abbreviation<D: PronouncingDictionary + ?Sized>(dict: &D, word: &str) -> bool {
+/// Frequent in wordfreq's English list, but not English words: fragments
+/// of words split apart ("ve", "ing") and foreign function words ("le",
+/// "der", "que").
+const NOT_WORDS: [&str; 16] = [
+    "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und", "su", "tu", "sa", "wa", "vi",
+    "fi",
+];
+
+/// Whether `word` is never a word, however it's said: spelled without a
+/// vowel letter, as abbreviations are ("sr", "mr", "lbs", "blvd";
+/// interjections such as "hmm" and "shh" aside), or a fragment or foreign
+/// function word ([`NOT_WORDS`]).
+pub fn not_a_word(word: &str) -> bool {
     let base = word.split('\'').next().unwrap_or(word);
     let vowelless = base.len() > 1
         && !base.contains(['a', 'e', 'i', 'o', 'u', 'y'])
         && !VOWELLESS_WORDS.contains(&base);
-    vowelless || spelled_as_letters(dict, word)
+    vowelless || NOT_WORDS.contains(&base)
+}
+
+/// Whether `pronunciation` reads `word` as an abbreviation: as its
+/// letters' names ("tv"; see [`said_as_letters`]), or as the longer word it
+/// stands for, three phonemes or more beyond its letters ("etc" as et
+/// cetera, "corp" as corporation, "feb"). Read as written ("corp" as K AO1
+/// R P, "gov", "min"), it isn't.
+pub fn abbreviated<D: PronouncingDictionary + ?Sized>(
+    dict: &D,
+    word: &str,
+    pronunciation: &[Phoneme],
+) -> bool {
+    let letters = word.chars().filter(char::is_ascii_alphabetic).count();
+    pronunciation.len() >= letters + 3 || said_as_letters(dict, word, pronunciation)
+}
+
+/// Whether `word` is only an abbreviation: [`not_a_word`], or every
+/// pronunciation of it [`abbreviated`].
+pub fn abbreviation<D: PronouncingDictionary + ?Sized>(dict: &D, word: &str) -> bool {
+    not_a_word(word)
+        || dict
+            .lookup(word)
+            .is_some_and(|ps| ps.iter().all(|p| abbreviated(dict, word, p)))
 }
 
 /// Whether some pronunciation of `word` is its letters' names said in
-/// turn: "tv" (T IY V IY), "uk", "ok" (OW K EY), stress aside. Initialisms
-/// read letter by letter; words read as words ("icy", "bee") aren't.
+/// turn (see [`said_as_letters`]).
 pub fn spelled_as_letters<D: PronouncingDictionary + ?Sized>(dict: &D, word: &str) -> bool {
-    use mime_reader::Phoneme;
+    dict.lookup(word)
+        .is_some_and(|ps| ps.iter().any(|p| said_as_letters(dict, word, p)))
+}
+
+/// Whether `pronunciation` is `word`'s letters' names said in turn: "tv"
+/// (T IY V IY), "uk", "ok" (OW K EY), stress aside. Initialisms read letter
+/// by letter; words read as words ("icy", "bee") aren't.
+pub fn said_as_letters<D: PronouncingDictionary + ?Sized>(
+    dict: &D,
+    word: &str,
+    pronunciation: &[Phoneme],
+) -> bool {
     let plain = |p: &Phoneme| match p {
         Phoneme::Vowel(v) => format!("{v}").trim_end_matches(['0', '1', '2']).to_string(),
         Phoneme::Consonant(c) => format!("{c}"),
     };
-    let sounds = |w: &str| -> Vec<Vec<String>> {
-        dict.lookup(w)
-            .map(|ps| ps.iter().map(|p| p.iter().map(plain).collect()).collect())
-            .unwrap_or_default()
-    };
     if word.len() < 2 || !word.chars().all(|c| c.is_ascii_lowercase()) {
         return false;
     }
-    let letters: Vec<Vec<Vec<String>>> = word.chars().map(|c| sounds(&c.to_string())).collect();
-    sounds(word).iter().any(|pron| {
-        // reach[k]: phoneme positions reachable after the first k letters.
-        let mut reach = vec![0usize];
-        for names in &letters {
-            let mut next: Vec<usize> = Vec::new();
-            for &at in &reach {
-                for name in names {
-                    let end = at + name.len();
-                    if end <= pron.len() && pron[at..end] == name[..] && !next.contains(&end) {
-                        next.push(end);
-                    }
+    let letters: Vec<Vec<Vec<String>>> = word
+        .chars()
+        .map(|c| {
+            dict.lookup(&c.to_string())
+                .map(|ps| ps.iter().map(|p| p.iter().map(plain).collect()).collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    let pron: Vec<String> = pronunciation.iter().map(plain).collect();
+    // reach: phoneme positions reachable after the letters so far.
+    let mut reach = vec![0usize];
+    for names in &letters {
+        let mut next: Vec<usize> = Vec::new();
+        for &at in &reach {
+            for name in names {
+                let end = at + name.len();
+                if end <= pron.len() && pron[at..end] == name[..] && !next.contains(&end) {
+                    next.push(end);
                 }
             }
-            reach = next;
         }
-        reach.contains(&pron.len())
-    })
+        reach = next;
+    }
+    reach.contains(&pron.len())
 }
 
 impl Bigrams {
@@ -447,15 +492,16 @@ impl Bigrams {
 }
 
 impl Lexicon {
-    /// The `max_words` most frequent words that CMUdict can pronounce, that
-    /// are spelled with letters and apostrophes only, and that `keep`
-    /// accepts — with every CMUdict pronunciation, or only the first.
+    /// The `max_words` most frequent words that CMUdict can pronounce and
+    /// that are spelled with letters and apostrophes only, with the
+    /// pronunciations `keep(word, pronunciation)` accepts — every one, or
+    /// only the first. A word `keep` accepts no pronunciation of is out.
     pub fn build<D: PronouncingDictionary>(
         dict: &D,
         frequencies: &[Frequency],
         max_words: usize,
         all_pronunciations: bool,
-        keep: impl Fn(&str) -> bool,
+        keep: impl Fn(&str, &[Phoneme]) -> bool,
     ) -> Self {
         let mut lexicon = Self {
             words: Vec::new(),
@@ -482,12 +528,22 @@ impl Lexicon {
             let word = frequency.word.as_str();
             let spelled_plainly = word.chars().all(|c| c.is_ascii_alphabetic() || c == '\'')
                 && word.chars().any(|c| c.is_ascii_alphabetic());
-            if !spelled_plainly || lexicon.index.contains_key(word) || !keep(word) {
+            if !spelled_plainly || lexicon.index.contains_key(word) {
                 continue;
             }
             let Some(pronunciations) = dict.lookup(word) else {
                 continue;
             };
+            // The pronunciations `keep` accepts, in CMUdict's order; none:
+            // the word is out.
+            let pronunciations: Vec<&[Phoneme]> = pronunciations
+                .iter()
+                .map(|p| &p[..])
+                .filter(|p| keep(word, p))
+                .collect();
+            if pronunciations.is_empty() {
+                continue;
+            }
             let id = lexicon.words.len() as WordId;
             lexicon.words.push(word.to_string());
             // P = 10^(zipf − 9) occurrences per word of text.
@@ -913,7 +969,7 @@ mod tests {
                 zipf: 7.0 - k as f32 * 0.01,
             })
             .collect();
-        let mut lexicon = Lexicon::build(cmudict(), &frequencies, usize::MAX, false, |_| true);
+        let mut lexicon = Lexicon::build(cmudict(), &frequencies, usize::MAX, false, |_, _| true);
         lexicon.set_spelling_variants(cmudict(), varcon());
         lexicon
     }
@@ -973,8 +1029,8 @@ mod tests {
             assert!(any.contains(word), "{word}");
         }
         assert!(!any.contains("b") && !any.contains("o"));
-        assert!(any.rejects_letter_spellings());
-        assert!(!CommonWords::parse("cat\n").rejects_letter_spellings());
+        assert!(any.rejects_abbreviations());
+        assert!(!CommonWords::parse("cat\n").rejects_abbreviations());
     }
 
     #[test]
@@ -989,12 +1045,45 @@ mod tests {
 
     #[test]
     fn abbreviations_are_told_from_words() {
-        for word in ["sr", "mr", "mrs", "lbs", "blvd", "tv", "tv's", "uk"] {
+        for word in [
+            "sr", "mr", "mrs", "lbs", "blvd", "tv", "tv's", "uk", "etc", "le", "ing",
+        ] {
             assert!(abbreviation(cmudict(), word), "{word}");
         }
-        for word in ["hmm", "shh", "my", "gym", "sister", "senior", "okay"] {
+        // Words, and abbreviations with a pronunciation read as written.
+        for word in [
+            "hmm", "shh", "my", "gym", "sister", "senior", "okay", "corp", "sep", "gov", "min",
+        ] {
             assert!(!abbreviation(cmudict(), word), "{word}");
         }
+    }
+
+    #[test]
+    fn the_lexicon_keeps_an_abbreviation_only_as_written() {
+        let frequencies: Vec<Frequency> = ["corp", "sep", "etc", "le", "people"]
+            .iter()
+            .map(|w| Frequency {
+                word: w.to_string(),
+                zipf: 5.0,
+            })
+            .collect();
+        let dict = cmudict();
+        let lexicon = Lexicon::build(dict, &frequencies, usize::MAX, true, |w, p| {
+            !not_a_word(w) && !abbreviated(dict, w, p)
+        });
+        let first = |w: &str| Ph::parse_all(w).unwrap();
+        // "corp" as K AO1 R P, not "corporation"; "sep" as S EH1 P, not S-E-P.
+        assert_eq!(
+            lexicon.first_pronunciation(lexicon.id("corp").unwrap()),
+            first("K AO1 R P")
+        );
+        assert_eq!(
+            lexicon.first_pronunciation(lexicon.id("sep").unwrap()),
+            first("S EH1 P")
+        );
+        assert_eq!(lexicon.id("etc"), None);
+        assert_eq!(lexicon.id("le"), None);
+        assert!(lexicon.id("people").is_some());
     }
 
     #[test]

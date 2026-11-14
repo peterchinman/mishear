@@ -46,7 +46,7 @@ fn main() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let frequencies = read_frequencies(&root.join("data/wordfreq-en.tsv"))?;
     let common = CommonWords::read(&root.join("../../data/ENABLE/enable1.txt"))?;
-    let lexicon = Lexicon::build(&dict, &frequencies, usize::MAX, true, |w| {
+    let lexicon = Lexicon::build(&dict, &frequencies, usize::MAX, true, |w, _| {
         all_words || common.contains(w)
     });
     let words: HashSet<&str> = (0..lexicon.len() as u32).map(|w| lexicon.word(w)).collect();

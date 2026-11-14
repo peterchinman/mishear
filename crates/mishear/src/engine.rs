@@ -8,15 +8,15 @@ use std::path::Path;
 
 use mime_reader::line::WordData;
 use mime_reader::{
-    CmuDictionary, ConfiguredDictionary, Line, PronouncingDictionary, PronunciationMode,
+    CmuDictionary, ConfiguredDictionary, Line, Phoneme, PronouncingDictionary, PronunciationMode,
 };
 
 use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::deform::Deformation;
 use crate::lexicon::{
-    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, abbreviation, read_frequencies,
-    spelling,
+    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, abbreviated, not_a_word,
+    read_frequencies, spelling,
 };
 use crate::phone::Ph;
 use crate::search::{
@@ -137,9 +137,12 @@ fn keeps<D: PronouncingDictionary + ?Sized>(
     dict: &D,
     common: Option<&CommonWords>,
     word: &str,
+    pronunciation: &[Phoneme],
 ) -> bool {
     common.is_none_or(|c| {
-        c.contains(word) && !(c.rejects_letter_spellings() && abbreviation(dict, word))
+        c.contains(word)
+            && !(c.rejects_abbreviations()
+                && (not_a_word(word) || abbreviated(dict, word, pronunciation)))
     })
 }
 
@@ -182,9 +185,13 @@ impl Engine {
         all_pronunciations: bool,
         common: Option<&CommonWords>,
     ) -> Self {
-        let lexicon = Lexicon::build(&dict, frequencies, vocabulary, all_pronunciations, |w| {
-            keeps(&dict, common, w)
-        });
+        let lexicon = Lexicon::build(
+            &dict,
+            frequencies,
+            vocabulary,
+            all_pronunciations,
+            |w, p| keeps(&dict, common, w, p),
+        );
         Self::with_lexicon(dict, lexicon)
     }
 
@@ -212,7 +219,7 @@ impl Engine {
             frequencies,
             vocabulary,
             all_pronunciations,
-            |w| keeps(&self.dict, common, w),
+            |w, p| keeps(&self.dict, common, w, p),
         );
         self.lexicon.set_spelling_variants(&self.dict, variants);
         if let Some((table, prior)) = bigrams {

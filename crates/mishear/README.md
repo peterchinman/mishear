@@ -72,11 +72,20 @@ besides contractions and possessives of them ("it's", "don't", "people's"):
 - **`none`** (default, or `--all-words`): every word frequent enough to be
   in the vocabulary, brands and foreign names included.
 
-`scowl` and `none` also drop single letters but "a" and "I", and
-abbreviations: words CMUdict pronounces as their letters' names ("tv",
-"uk", "ok"), and words spelled without a vowel letter, which CMUdict reads
-as the word they stand for ("sr" as "senior", "mr", "lbs"), interjections
-such as "hmm" and "shh" aside.
+`scowl` and `none` also drop:
+
+- single letters but "a" and "I";
+- words spelled without a vowel letter, which CMUdict reads as the word
+  they stand for ("sr" as "senior", "mr", "lbs"), interjections such as
+  "hmm" and "shh" aside;
+- pronunciations that read a word as an abbreviation: as its letters'
+  names ("tv", "uk", "ok"; "sep" as S-E-P), or as the longer word it stands
+  for, three phonemes or more beyond its letters ("etc" as et cetera,
+  "corp" as corporation, "feb"). A word read as written keeps that reading
+  ("corp" as K AO1 R P, "sep", "gov", "min");
+- fragments and foreign function words that are frequent in wordfreq's
+  list: "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und",
+  "su", "tu", "sa", "wa", "vi", "fi".
 
 VarCon's spelling variants ([`data/VarCon`](../../data/VarCon), from SCOWL,
 permissive license, committed) map British, Canadian and Australian

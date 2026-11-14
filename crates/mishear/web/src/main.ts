@@ -203,7 +203,7 @@ const LEXICON_KNOBS: Knob[] = [
     key: 'word_list',
     label: 'word list',
     hint: 'Which words count as real words.',
-    info: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, and abbreviations: words said as their letters (“TV”, “UK”) or spelled without a vowel (“Sr”, “Mr”, “lbs”).',
+    info: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, abbreviations (words said as their letters, “TV”, or spelled without a vowel, “Sr”; a clipped word is kept only as written: “corp” as “corp”, not “corporation”), and fragments and foreign function words (“ve”, “ing”, “le”, “der”, “que”).',
     options: [
       { value: 'enable', label: 'ENABLE' },
       { value: 'scowl', label: 'SCOWL' },
