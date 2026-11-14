@@ -143,8 +143,13 @@ What the page has:
   novelty).
 - **Random line:** picks from the public-domain poems in `data/echo/public`.
   The private corpus is never bundled.
-- **Results:** the hearings, with their cost breakdown, and a grid aligning
-  each heard word with the phonemes it covers.
+- **Results:** for each line of the input, heard on its own, the hearings
+  with their cost breakdown, and a grid aligning each heard word with the
+  phonemes it covers. A passage heard as one long line costs about the
+  square of its length (the search's bound grows with the line, and every
+  word position may spend all of it), so lines are heard one by one, as
+  `hear` and `mishear` do on the command line; hearings don't run across a
+  line break.
 - **Search, cost and lexicon panels:** every field of `SearchConfig`,
   `CostConfig` and the lexicon options but the cost bound (the page always
   asks for the top N). Defaults come from the Rust side. Changing the
@@ -152,7 +157,8 @@ What the page has:
   rather than as their flags: "rarity cost" is `--commonness`, "sense"
   `--fit`, "cost per word" `--word-penalty`, "variety of list" `--variety`.
   Each knob has a short description and, behind its ⓘ, a technical one.
-- **Sweep:** the CLI `sweep` for any numeric search or cost knob.
+- **Sweep:** the CLI `sweep` for any numeric search or cost knob, on the
+  first line.
 - **Saving:** settings are kept in localStorage, and "Copy link" puts them in
   the URL.
 

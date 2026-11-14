@@ -368,10 +368,19 @@ function groupDefaults(group: Group): Record<string, unknown> {
 /** The page hears lines as spoken. */
 const NO_DEFORMATION: DeformationDto = { steps: [], intensity: 1, seed: 0 };
 
-function request(): RequestDto {
+/** The input split into lines, each heard on its own. */
+function inputLines(): string[] {
+  const text = state.mode === 'mishear' ? state.text : state.phonemes;
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function request(text: string): RequestDto {
   return {
     mode: state.mode,
-    text: state.mode === 'mishear' ? state.text : state.phonemes,
+    text,
     deformation: NO_DEFORMATION,
     search: state.search,
     cost: state.cost,
@@ -584,22 +593,18 @@ function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement): void 
 
 // -------------------------------------------------------------- results ----
 
-let selectedHearing = 0;
-let lastResult: ResultDto | null = null;
-
-function renderResult(result: ResultDto, ms: number, rebuildMs: number): void {
-  lastResult = result;
-  showError('');
+/** One line's hearings, its stats and its alignment grid, which
+ * highlights the hearing last clicked. */
+function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: number, several: boolean): HTMLElement {
   const mishear = result.words.length > 0;
-  // Hearings.
-  $('heard-section').hidden = false;
-  selectedHearing = Math.min(selectedHearing, Math.max(0, result.hearings.length - 1));
-  const list = $('hearings');
+  let selected = 0;
+  const grid = el('div', { className: 'alignment' });
+  const list = el('ol', { className: 'hearings' });
   list.replaceChildren(
     ...result.hearings.map((h, i) => {
       const li = el(
         'li',
-        { className: i === selectedHearing ? 'selected' : '' },
+        { className: i === selected ? 'selected' : '' },
         el('span', { className: 'text', textContent: h.text }),
         el('span', {
           className: 'meta',
@@ -615,30 +620,44 @@ function renderResult(result: ResultDto, ms: number, rebuildMs: number): void {
         }),
       );
       li.onclick = () => {
-        selectedHearing = i;
+        selected = i;
         list.querySelectorAll('li').forEach((x, k) => x.classList.toggle('selected', k === i));
-        $('alignment')
-          .querySelectorAll<HTMLElement>('.chip')
-          .forEach((c) => c.classList.toggle('selected', c.dataset.row === String(i)));
+        grid.querySelectorAll<HTMLElement>('.chip').forEach((c) => c.classList.toggle('selected', c.dataset.row === String(i)));
       };
       return li;
     }),
   );
   if (!result.hearings.length) list.append(el('li', { className: 'hint', textContent: 'Nothing within the bound. Raise “max bound”.' }));
   const s = result.stats;
-  const parts = [
+  const stats = [
     `${result.hearings.length} in ${thousands(ms)} ms`,
     rebuildMs ? `(lexicon rebuilt in ${thousands(rebuildMs)} ms)` : '',
     `bound ${fmt(s.bound, 1)} after ${s.rounds} round${s.rounds === 1 ? '' : 's'}`,
     `${thousands(s.nodes)} trie nodes`,
     `${thousands(s.edges)} edges`,
   ];
-  $('stats').textContent = parts.filter(Boolean).join(' · ');
-  renderAlignment(result);
+  renderAlignment(grid, result, selected);
+  const alignment = el(
+    'details',
+    { className: 'alignment-block', open: alignmentOpen },
+    el('summary', { textContent: 'Alignment' }),
+    el('div', { className: 'alignment-scroll' }, grid),
+  );
+  alignment.addEventListener('toggle', () => (alignmentOpen = alignment.open));
+  return el(
+    'section',
+    { className: 'heard-line' },
+    ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
+    list,
+    el('p', { className: 'hint', textContent: stats.filter(Boolean).join(' · ') }),
+    alignment,
+  );
 }
 
-function renderAlignment(result: ResultDto): void {
-  const grid = $('alignment');
+/** Whether alignments start open: the last one toggled sets it. */
+let alignmentOpen = true;
+
+function renderAlignment(grid: HTMLElement, result: ResultDto, selected: number): void {
   const n = result.input.length;
   grid.style.gridTemplateColumns = `auto repeat(${n}, max-content)`;
   const cells: HTMLElement[] = [];
@@ -672,7 +691,7 @@ function renderAlignment(result: ResultDto): void {
     label(`${i + 1}`, row);
     for (const w of h.words) {
       const chip = el('div', {
-        className: `chip${lineWords.has(w.text) ? ' shared' : ''}${i === selectedHearing ? ' selected' : ''}`,
+        className: `chip${lineWords.has(w.text) ? ' shared' : ''}${i === selected ? ' selected' : ''}`,
         textContent: w.text,
         title: result.input.slice(w.start, w.end).join(' '),
       });
@@ -747,7 +766,7 @@ async function runSweep(): Promise<void> {
     knob.apply(s, v);
     const saved = state;
     state = s;
-    const req = request();
+    const req = request(inputLines()[0] ?? '');
     state = saved;
     const reply = await call({ type: 'run', id: nextId++, lexicon: s.lexicon, request: req });
     const column = columns[k];
@@ -794,24 +813,40 @@ async function run(): Promise<void> {
   running = true;
   do {
     rerun = false;
-    const text = state.mode === 'mishear' ? state.text : state.phonemes;
-    if (!text.trim()) break;
-    setStatus(sameLexicon() ? 'Hearing…' : 'Rebuilding the lexicon, then hearing…', true);
-    const lexicon = structuredClone(state.lexicon);
-    const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request()) });
-    if (reply.type === 'result') lastLexicon = lexicon;
-    if (rerun) continue; // Stale: the knobs moved while it ran.
-    if (reply.type === 'result') {
+    const lines = inputLines();
+    if (!lines.length) break;
+    const blocks: HTMLElement[] = [];
+    let total = 0;
+    let notice: string | undefined;
+    let failed = false;
+    showError('');
+    for (const [k, line] of lines.entries()) {
+      const what = lines.length > 1 ? `line ${k + 1} of ${lines.length}` : '';
+      setStatus(sameLexicon() ? `Hearing${what ? ` ${what}` : ''}…` : 'Rebuilding the lexicon, then hearing…', true);
+      const lexicon = structuredClone(state.lexicon);
+      const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line)) });
+      if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
+      if (rerun) break; // Stale: the input or knobs moved while it ran.
+      if (reply.type === 'error') {
+        setStatus('');
+        showError(lines.length > 1 ? `Line ${k + 1}: ${reply.message}` : reply.message);
+        failed = true;
+        break;
+      }
+      if (reply.type !== 'result') continue;
       lexiconInfo = reply.info;
       engineMemoryMb = reply.memoryMb;
-      renderLexiconInfo();
-      renderResult(reply.result, reply.ms, reply.rebuildMs);
-      setStatus(reply.notice ? `Heard in ${thousands(reply.ms)} ms. ${reply.notice}` : `Heard in ${thousands(reply.ms)} ms`);
-    } else if (reply.type === 'error') {
-      lastLexicon = lexicon;
-      setStatus('');
-      showError(reply.message);
+      notice = reply.notice ?? notice;
+      total += reply.ms + reply.rebuildMs;
+      blocks.push(lineBlock(line, reply.result, reply.ms, reply.rebuildMs, lines.length > 1));
+      // Each line shows as soon as it's heard.
+      $('heard-section').hidden = false;
+      $('heard-lines').replaceChildren(...blocks);
     }
+    if (rerun || failed) continue;
+    renderLexiconInfo();
+    const heard = lines.length > 1 ? `Heard ${lines.length} lines in ${thousands(total)} ms` : `Heard in ${thousands(total)} ms`;
+    setStatus(notice ? `${heard}. ${notice}` : heard);
   } while (rerun);
   running = false;
 }
@@ -832,7 +867,7 @@ function renderLexiconInfo(): void {
 function renderInput(): void {
   const text = $<HTMLTextAreaElement>('text');
   text.value = state.mode === 'mishear' ? state.text : state.phonemes;
-  text.placeholder = state.mode === 'mishear' ? 'A line of verse' : 'ARPAbet, e.g. K IH1 S DH AH0 S K AY1';
+  text.placeholder = state.mode === 'mishear' ? 'A line of verse, or several (each is heard on its own)' : 'ARPAbet, e.g. K IH1 S DH AH0 S K AY1 (one line per line)';
   document.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach((r) => (r.checked = r.value === state.mode));
   $<HTMLInputElement>('auto-run').checked = state.autoRun;
 }

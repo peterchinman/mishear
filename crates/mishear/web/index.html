@@ -36,7 +36,7 @@
         <details>
           <summary>Sweep</summary>
           <div class="panel-body">
-            <p class="hint">Run the line once per value of one knob, everything else fixed.</p>
+            <p class="hint">Run the (first) line once per value of one knob, everything else fixed.</p>
             <label class="row">knob <select id="sweep-knob"></select></label>
             <label class="row">values <input id="sweep-values" type="text" /></label>
             <button id="sweep-run" type="button">Run sweep</button>
@@ -50,7 +50,7 @@
             <label><input type="radio" name="mode" value="mishear" checked /> text</label>
             <label><input type="radio" name="mode" value="phonemes" /> ARPAbet phonemes</label>
           </div>
-          <textarea id="text" rows="2" spellcheck="false"></textarea>
+          <textarea id="text" rows="3" spellcheck="false"></textarea>
           <div class="input-actions">
             <button id="run" type="button" class="primary">Hear</button>
             <button id="random-line" type="button">Random public-domain line</button>
@@ -61,11 +61,8 @@
         <div id="error" class="error" hidden></div>
         <section id="heard-section" hidden>
           <h2>Heard</h2>
-          <ol id="hearings" class="hearings"></ol>
-          <p id="stats" class="hint"></p>
-          <h3>Alignment</h3>
-          <p class="hint">Each heard word over the phonemes it covers.</p>
-          <div class="alignment-scroll"><div id="alignment" class="alignment"></div></div>
+          <p class="hint">Each line is heard on its own. Under each, the alignment shows every heard word over the phonemes it covers.</p>
+          <div id="heard-lines"></div>
         </section>
         <section id="sweep-section" hidden>
           <h2 id="sweep-title">Sweep</h2>

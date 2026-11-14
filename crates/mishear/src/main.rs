@@ -20,7 +20,8 @@ mishear — fuzzy phonetic search, accents and mishearings, on mime-reader
 USAGE: cargo run --release -p mishear -- COMMAND [OPTIONS]
 
   search ARPABET…    the word sequences that best match these phonemes
-  hear TEXT          other ways to hear TEXT's own sounds (mondegreens)
+  hear TEXT          other ways to hear TEXT's own sounds (mondegreens); each
+                     line of a multi-line TEXT is heard on its own
   deform TEXT        TEXT's phonemes before and after a deformation
   mishear TEXT       deform TEXT, then hear it back
   examples           mishear lines drawn from data/echo
@@ -658,7 +659,19 @@ fn run(o: Options) -> Result<(), String> {
             } else {
                 o
             };
-            print_mishearing(&engine, &text, &o)?;
+            // Each line of a passage is heard on its own: a whole passage
+            // as one line costs about the square of its length.
+            let lines: Vec<&str> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .collect();
+            for (k, line) in lines.iter().enumerate() {
+                if k > 0 {
+                    println!();
+                }
+                print_mishearing(&engine, line, &o)?;
+            }
         }
         "deform" => {
             let engine = engine(&o)?;

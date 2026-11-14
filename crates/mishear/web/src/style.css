@@ -256,6 +256,22 @@ aside summary {
   font-size: 0.85rem;
 }
 
+.heard-line + .heard-line {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 0.2rem;
+}
+.heard-line .line-text {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0.8rem 0 0.2rem;
+}
+.alignment-block > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.3rem 0;
+}
 .hearings {
   padding-left: 2rem;
   margin: 0.3rem 0;
