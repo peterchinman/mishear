@@ -53,24 +53,13 @@ type Knob = NumberKnob | BoolKnob | ChoiceKnob;
 type Group = 'search' | 'cost' | 'lexicon';
 
 const SEARCH_KNOBS: Knob[] = [
-  { type: 'number', key: 'results', label: 'results', hint: 'How many hearings to show.', info: 'The exact top N hearings by total cost. With “only within cost” on, at most N of those within that cost.', min: 1, max: 50, step: 1 },
-  {
-    type: 'number',
-    key: 'within',
-    label: 'only within cost',
-    hint: 'Only show hearings cheaper than this. Faster, but may show fewer.',
-    info: 'Return hearings costing at most this (up to N of them), exactly. Faster; may return fewer. Off: the bound starts at 2 and rises until N are found.',
-    min: 0.5,
-    max: 15,
-    step: 0.1,
-    onValue: 4,
-  },
+  { type: 'number', key: 'results', label: 'results', hint: 'How many hearings to show.', info: 'The exact top N hearings by total cost.', min: 1, max: 50, step: 1 },
   {
     type: 'number',
     key: 'familiar',
     label: 'familiar words',
     hint: 'Vocabulary size: this many of the most common words pay no rarity cost.',
-    info: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no commonness, and a rarer word pays for how much rarer it is than the last of them. Commonness sets how steep that edge is. Off: every word pays for all its rarity, “the” included, so commonness also favors hearings of fewer words.',
+    info: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no rarity cost, and a rarer word pays for how much rarer it is than the last of them. “Rarity cost” sets how steep that edge is. Off: every word pays for all its rarity, “the” included, so rarity cost also favors hearings of fewer words.',
     min: 500,
     max: 50000,
     step: 500,
@@ -79,7 +68,7 @@ const SEARCH_KNOBS: Knob[] = [
   {
     type: 'number',
     key: 'commonness',
-    label: 'commonness',
+    label: 'rarity cost',
     hint: 'How strongly common words are preferred over rare ones.',
     info: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ (all of it when “familiar words” is off): how much common words are preferred, or how steep the edge of the vocabulary is. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. 0: a rare word costs no more than “the”. With “familiar words” off and this high, hearings collapse into single long words (“recommendations”).',
     min: 0,
@@ -89,20 +78,20 @@ const SEARCH_KNOBS: Knob[] = [
   {
     type: 'number',
     key: 'fit',
-    label: 'fit',
+    label: 'sense',
     hint: 'How much each word must make sense after the one before.',
-    info: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
+    info: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s cost per word + rarity cost + sense never goes below zero.',
     min: 0,
     max: 0.5,
     step: 0.005,
   },
-  { type: 'number', key: 'word_penalty', label: 'word penalty', hint: 'Cost per word: higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s penalty + commonness + fit never goes below zero.', min: 0, max: 2, step: 0.01 },
+  { type: 'number', key: 'word_penalty', label: 'cost per word', hint: 'Higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s cost per word + rarity cost + sense never goes below zero.', min: 0, max: 2, step: 0.01 },
   {
     type: 'number',
     key: 'shortlist',
     label: 'bigram shortlist',
     hint: 'Pair-search width: wider is more exact and slower.',
-    info: 'With fit above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
+    info: 'With sense above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
     min: 5,
     max: 200,
     step: 1,
@@ -112,7 +101,7 @@ const SEARCH_KNOBS: Knob[] = [
     key: 'beam',
     label: 'bigram beam',
     hint: 'Partial hearings the pair search keeps: wider is more exact, slower.',
-    info: 'With fit above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small fit, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
+    info: 'With sense above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small sense weight, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
     min: 10,
     max: 400,
     step: 10,
@@ -137,7 +126,7 @@ const SEARCH_KNOBS: Knob[] = [
   {
     type: 'number',
     key: 'variety',
-    label: 'variety',
+    label: 'variety of list',
     hint: 'Penalty for reusing words from the hearings above, so the list varies.',
     info: 'Extra cost per word an earlier hearing in the list used, in any form (“arrive” after “arrives”), or a homophone of one (“cents” after “sense”), as novelty does for the line’s own words. Each hearing is then the best one given those above it, so the list varies. 0: the plain top N, which often differ by a word. With bigrams on, it slows the search several-fold.',
     min: 0,
@@ -332,7 +321,8 @@ function loadState(): State {
   return {
     ...base,
     ...kept,
-    search: { ...base.search, ...unsaved(saved.search) },
+    // "only within cost" is gone from the page: the top N, always.
+    search: { ...base.search, ...unsaved(saved.search), within: base.search.within },
     cost: { ...base.cost, ...unsaved(saved.cost) },
     lexicon: { ...base.lexicon, ...unsaved(saved.lexicon) },
   };
@@ -621,7 +611,7 @@ function renderResult(result: ResultDto, ms: number, rebuildMs: number): void {
             ...(result.boundaries.length ? [`crosses ${result.boundaries.length - h.kept} of ${result.boundaries.length} boundaries`] : []),
           ].join(' · '),
           title:
-            'cost: sound + word prior + word penalty + novelty + same-root + kept boundaries + variety. sound: the phonetic part alone. same root: words other than the line’s own that share a stem with one of them. reused: words an earlier hearing in the list used.',
+            'cost: sound + cost per word + rarity cost + sense + novelty + same-root + kept boundaries + variety of list. sound: the phonetic part alone. same root: words other than the line’s own that share a stem with one of them. reused: words an earlier hearing in the list used.',
         }),
       );
       li.onclick = () => {
@@ -634,7 +624,7 @@ function renderResult(result: ResultDto, ms: number, rebuildMs: number): void {
       return li;
     }),
   );
-  if (!result.hearings.length) list.append(el('li', { className: 'hint', textContent: 'Nothing within the bound. Raise “max bound” or “only within cost”.' }));
+  if (!result.hearings.length) list.append(el('li', { className: 'hint', textContent: 'Nothing within the bound. Raise “max bound”.' }));
   const s = result.stats;
   const parts = [
     `${result.hearings.length} in ${thousands(ms)} ms`,

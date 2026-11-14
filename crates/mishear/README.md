@@ -134,8 +134,12 @@ What the page has:
 - **Results:** the hearings, with their cost breakdown, and a grid aligning
   each heard word with the phonemes it covers.
 - **Search, cost and lexicon panels:** every field of `SearchConfig`,
-  `CostConfig` and the lexicon options. Defaults come from the Rust side.
-  Changing the lexicon rebuilds it in the worker.
+  `CostConfig` and the lexicon options but the cost bound (the page always
+  asks for the top N). Defaults come from the Rust side. Changing the
+  lexicon rebuilds it in the worker. Some knobs are named for what they do
+  rather than as their flags: "rarity cost" is `--commonness`, "sense"
+  `--fit`, "cost per word" `--word-penalty`, "variety of list" `--variety`.
+  Each knob has a short description and, behind its ⓘ, a technical one.
 - **Sweep:** the CLI `sweep` for any numeric search or cost knob.
 - **Saving:** settings are kept in localStorage, and "Copy link" puts them in
   the URL.
