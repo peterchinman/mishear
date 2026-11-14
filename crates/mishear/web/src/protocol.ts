@@ -36,8 +36,6 @@ export function sameLexicon(a: LexiconOptions | null, b: LexiconOptions | null):
     b !== null &&
     a.vocabulary === b.vocabulary &&
     a.all_pronunciations === b.all_pronunciations &&
-    a.word_list === b.word_list &&
-    (a.word_list !== 'scowl' || a.scowl_level === b.scowl_level) &&
     a.bigram_prior === b.bigram_prior
   );
 }

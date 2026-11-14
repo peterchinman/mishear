@@ -8,15 +8,14 @@ use std::path::Path;
 
 use mime_reader::line::WordData;
 use mime_reader::{
-    CmuDictionary, ConfiguredDictionary, Line, Phoneme, PronouncingDictionary, PronunciationMode,
+    CmuDictionary, ConfiguredDictionary, Line, PronouncingDictionary, PronunciationMode,
 };
 
 use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::deform::Deformation;
 use crate::lexicon::{
-    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, abbreviated, not_a_word,
-    read_frequencies, spelling,
+    Frequency, Lexicon, SpellingVariants, WordId, admits, read_frequencies, spelling,
 };
 use crate::phone::Ph;
 use crate::search::{
@@ -132,20 +131,6 @@ pub struct Mishearing {
     pub stats: SearchStats,
 }
 
-/// Whether the lexicon keeps `word`: every word when `common` is `None`.
-fn keeps<D: PronouncingDictionary + ?Sized>(
-    dict: &D,
-    common: Option<&CommonWords>,
-    word: &str,
-    pronunciation: &[Phoneme],
-) -> bool {
-    common.is_none_or(|c| {
-        c.contains(word)
-            && !(c.rejects_abbreviations()
-                && (not_a_word(word) || abbreviated(dict, word, pronunciation)))
-    })
-}
-
 /// A dictionary, a lexicon and a cost model, loaded once.
 pub struct Engine {
     dict: ConfiguredDictionary<CmuDictionary>,
@@ -155,15 +140,14 @@ pub struct Engine {
 
 impl Engine {
     /// Loads CMUdict from `cmudict` and the frequency list from
-    /// `frequencies`, keeping the `vocabulary` most frequent words — only
-    /// those in `common` when given — with every pronunciation or only the
+    /// `frequencies`, keeping the `vocabulary` most frequent words the
+    /// lexicon admits (see [`admits`]), with every pronunciation or only the
     /// first.
     pub fn load(
         cmudict: &Path,
         frequencies: &Path,
         vocabulary: usize,
         all_pronunciations: bool,
-        common: Option<&CommonWords>,
     ) -> Result<Self, String> {
         let dict =
             CmuDictionary::load(cmudict).map_err(|e| format!("{}: {e}", cmudict.display()))?;
@@ -172,25 +156,23 @@ impl Engine {
             &read_frequencies(frequencies)?,
             vocabulary,
             all_pronunciations,
-            common,
         ))
     }
 
     /// An engine over `dict`, keeping the `vocabulary` most frequent of
-    /// `frequencies` (only those in `common` when given).
+    /// `frequencies` the lexicon admits.
     pub fn new(
         dict: CmuDictionary,
         frequencies: &[Frequency],
         vocabulary: usize,
         all_pronunciations: bool,
-        common: Option<&CommonWords>,
     ) -> Self {
         let lexicon = Lexicon::build(
             &dict,
             frequencies,
             vocabulary,
             all_pronunciations,
-            |w, p| keeps(&dict, common, w, p),
+            |w, p| admits(&dict, w, p),
         );
         Self::with_lexicon(dict, lexicon)
     }
@@ -210,7 +192,6 @@ impl Engine {
         frequencies: &[Frequency],
         vocabulary: usize,
         all_pronunciations: bool,
-        common: Option<&CommonWords>,
     ) {
         let bigrams = self.lexicon.bigram_table();
         let variants = self.lexicon.spelling_variants();
@@ -219,7 +200,7 @@ impl Engine {
             frequencies,
             vocabulary,
             all_pronunciations,
-            |w, p| keeps(&self.dict, common, w, p),
+            |w, p| admits(&self.dict, w, p),
         );
         self.lexicon.set_spelling_variants(&self.dict, variants);
         if let Some((table, prior)) = bigrams {
@@ -604,7 +585,7 @@ mod tests {
             zipf,
         })
         .collect();
-        Engine::new(dict, &frequencies, 100, true, None)
+        Engine::new(dict, &frequencies, 100, true)
     }
 
     fn heard(engine: &Engine, config: &MishearConfig) -> Vec<Heard> {
@@ -666,7 +647,6 @@ mod tests {
             ("musical", 4.6),
             ("neighbor", 4.5),
             ("neighbors", 4.4),
-            ("neighbour's", 3.9),
             ("music's", 3.5),
             ("nay", 3.0),
             ("burs", 2.0),
@@ -677,8 +657,9 @@ mod tests {
             zipf,
         })
         .collect();
-        let american = CommonWords::parse("music\nmusical\nneighbor\nneighbors\nnay\nburs\n");
-        let mut engine = Engine::new(dict, &frequencies, 100, true, Some(&american));
+        // CMUdict reads "neighbour's"; the frequency list, as an American one
+        // might, lacks it.
+        let mut engine = Engine::new(dict, &frequencies, 100, true);
         engine.set_spelling_variants(
             SpellingVariants::parse("neighbour's\tneighbor's\nneighbours\tneighbors\n").unwrap(),
         );

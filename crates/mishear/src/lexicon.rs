@@ -234,152 +234,6 @@ pub fn parse_frequencies(text: &str) -> Result<Vec<Frequency>, String> {
         .collect()
 }
 
-/// Real words: those a word list has, and contractions and possessives of
-/// them: "it's", "don't", "people's", but not "america's" or "o'brien" when
-/// the list lacks "america".
-///
-/// Three lists:
-/// - ENABLE ([`Self::parse`]): every inflected form, and no names, brands or
-///   abbreviations; a Scrabble list, so it keeps "haar" and "qi".
-/// - SCOWL ([`Self::parse_levels`]): words with a size level, from 10 (the
-///   most common) to 80, kept up to [`Self::with_max_level`]; names,
-///   places, days and months included, abbreviations not.
-/// - Every word ([`Self::any`]).
-///
-/// SCOWL and every-word lists drop single letters but "a" and "i", words
-/// that are never words ([`not_a_word`]: "sr", "le"), and pronunciations
-/// that read a word as an abbreviation ([`abbreviated`]: "tv", "etc" as et
-/// cetera), keeping a word read as written ("corp" as K AO1 R P).
-pub struct CommonWords {
-    /// Each listed word's level; `None`: every word.
-    words: Option<HashMap<String, u8>>,
-    max_level: u8,
-    single_letters: &'static [&'static str],
-    no_abbreviations: bool,
-}
-
-/// What follows the apostrophe of a contraction or possessive: "it's",
-/// "you're", "i've", "we'll", "she'd", "i'm", "don't".
-const CLITICS: [&str; 7] = ["s", "re", "ve", "ll", "d", "m", "t"];
-
-/// Negations whose base isn't a word: "can't", "won't", "shan't", "ain't".
-const NEGATED: [&str; 4] = ["ca", "wo", "sha", "ai"];
-
-/// Contractions with parts that aren't words.
-const CONTRACTIONS: [&str; 4] = ["o'clock", "c'mon", "y'know", "y'all"];
-
-/// The SCOWL level kept by default: a large spell-checker dictionary's.
-pub const DEFAULT_SCOWL_LEVEL: u8 = 60;
-
-impl CommonWords {
-    /// Reads a word list such as ENABLE, one word per line; capitalized
-    /// entries (proper nouns, in lists that have them) are ignored.
-    pub fn read(path: &Path) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(Self::parse(&text))
-    }
-
-    /// [`Self::read`] from the list's text.
-    pub fn parse(text: &str) -> Self {
-        Self {
-            words: Some(
-                text.lines()
-                    .map(str::trim)
-                    .filter(|w| w.chars().next().is_some_and(|c| c.is_ascii_lowercase()))
-                    .map(|w| (w.to_string(), 0))
-                    .collect(),
-            ),
-            max_level: u8::MAX,
-            single_letters: &["a", "i", "o"],
-            no_abbreviations: false,
-        }
-    }
-
-    /// Reads SCOWL's levels, `word<TAB>level` lines
-    /// (`data/SCOWL/scowl-levels.tsv`), keeping words up to
-    /// [`DEFAULT_SCOWL_LEVEL`].
-    pub fn read_levels(path: &Path) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Self::parse_levels(&text).map_err(|e| format!("{}: {e}", path.display()))
-    }
-
-    /// [`Self::read_levels`] from the file's text.
-    pub fn parse_levels(text: &str) -> Result<Self, String> {
-        let mut words = HashMap::new();
-        for (n, line) in text.lines().enumerate() {
-            if line.is_empty() {
-                continue;
-            }
-            let level = line
-                .split_once('\t')
-                .and_then(|(word, level)| Some((word, level.parse::<u8>().ok()?)))
-                .ok_or_else(|| format!("line {}: expected word<TAB>level", n + 1))?;
-            words.insert(level.0.to_string(), level.1);
-        }
-        Ok(Self {
-            words: Some(words),
-            max_level: DEFAULT_SCOWL_LEVEL,
-            single_letters: &["a", "i"],
-            no_abbreviations: true,
-        })
-    }
-
-    /// Every word, but single letters and spelled-out letters.
-    pub fn any() -> Self {
-        Self {
-            words: None,
-            max_level: u8::MAX,
-            single_letters: &["a", "i"],
-            no_abbreviations: true,
-        }
-    }
-
-    /// Keeps listed words up to `level` (SCOWL's 10 to 80).
-    pub fn with_max_level(mut self, level: u8) -> Self {
-        self.max_level = level;
-        self
-    }
-
-    /// [`Self::with_max_level`] in place.
-    pub fn set_max_level(&mut self, level: u8) {
-        self.max_level = level;
-    }
-
-    /// Whether [`not_a_word`]s and [`abbreviated`] pronunciations are to go
-    /// too.
-    pub fn rejects_abbreviations(&self) -> bool {
-        self.no_abbreviations
-    }
-
-    fn listed(&self, word: &str) -> bool {
-        self.words
-            .as_ref()
-            .is_none_or(|words| words.get(word).is_some_and(|&l| l <= self.max_level))
-    }
-
-    pub fn contains(&self, word: &str) -> bool {
-        if word.chars().count() == 1 {
-            return self.single_letters.contains(&word);
-        }
-        if !word.contains('\'') {
-            return self.listed(word);
-        }
-        if CONTRACTIONS.contains(&word) {
-            return true;
-        }
-        if let Some(base) = word.strip_suffix("n't") {
-            return self.listed(base) || NEGATED.contains(&base);
-        }
-        // "it's", "people's", "i'm", "'em": a word, then clitics.
-        word.split('\'').enumerate().all(|(k, part)| {
-            part.is_empty()
-                || part == "i"
-                || self.listed(part)
-                || (k > 0 && CLITICS.contains(&part))
-        })
-    }
-}
-
 /// Interjections spelled without a vowel letter.
 const VOWELLESS_WORDS: [&str; 12] = [
     "hmm", "hm", "mm", "mmm", "shh", "sh", "psst", "brr", "pfft", "tsk", "grr", "zzz",
@@ -392,6 +246,20 @@ const NOT_WORDS: [&str; 16] = [
     "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und", "su", "tu", "sa", "wa", "vi",
     "fi",
 ];
+
+/// Whether the lexicon admits `word` read as `pronunciation`: every word
+/// frequent enough is in but single letters other than "a" and "i", words
+/// that are never words ([`not_a_word`]: "sr", "le"), and readings of a word
+/// as an abbreviation ([`abbreviated`]: "tv", "etc" as et cetera). A word
+/// read as written keeps that reading ("corp" as K AO1 R P).
+pub fn admits<D: PronouncingDictionary + ?Sized>(
+    dict: &D,
+    word: &str,
+    pronunciation: &[Phoneme],
+) -> bool {
+    let single_letter = word.chars().count() == 1 && !matches!(word, "a" | "i");
+    !single_letter && !not_a_word(word) && !abbreviated(dict, word, pronunciation)
+}
 
 /// Whether `word` is never a word, however it's said: spelled without a
 /// vowel letter, as abbreviations are ("sr", "mr", "lbs", "blvd";
@@ -1006,34 +874,6 @@ mod tests {
     }
 
     #[test]
-    fn scowl_keeps_words_up_to_its_level() {
-        let scowl =
-            CommonWords::parse_levels("monday\t35\njude\t50\nhaar\t70\npeople\t10\nb\t35\n")
-                .unwrap();
-        for word in ["monday", "jude", "people's", "jude's", "a", "i"] {
-            assert!(scowl.contains(word), "{word}");
-        }
-        // Too rare at the default level; single letters but "a" and "i".
-        for word in ["haar", "b", "o", "london"] {
-            assert!(!scowl.contains(word), "{word}");
-        }
-        let all = scowl.with_max_level(80);
-        assert!(all.contains("haar"));
-        assert!(CommonWords::parse_levels("monday 35\n").is_err());
-    }
-
-    #[test]
-    fn every_word_but_single_letters() {
-        let any = CommonWords::any();
-        for word in ["haar", "london", "uber", "a", "i"] {
-            assert!(any.contains(word), "{word}");
-        }
-        assert!(!any.contains("b") && !any.contains("o"));
-        assert!(any.rejects_abbreviations());
-        assert!(!CommonWords::parse("cat\n").rejects_abbreviations());
-    }
-
-    #[test]
     fn spelled_out_letters_are_told_from_words() {
         for word in ["tv", "uk", "fbi", "ok", "usa"] {
             assert!(spelled_as_letters(cmudict(), word), "{word}");
@@ -1059,8 +899,8 @@ mod tests {
     }
 
     #[test]
-    fn the_lexicon_keeps_an_abbreviation_only_as_written() {
-        let frequencies: Vec<Frequency> = ["corp", "sep", "etc", "le", "people"]
+    fn the_lexicon_admits_words_and_abbreviations_only_as_written() {
+        let frequencies: Vec<Frequency> = ["corp", "sep", "etc", "le", "people", "a", "b", "sr"]
             .iter()
             .map(|w| Frequency {
                 word: w.to_string(),
@@ -1069,7 +909,7 @@ mod tests {
             .collect();
         let dict = cmudict();
         let lexicon = Lexicon::build(dict, &frequencies, usize::MAX, true, |w, p| {
-            !not_a_word(w) && !abbreviated(dict, w, p)
+            admits(dict, w, p)
         });
         let first = |w: &str| Ph::parse_all(w).unwrap();
         // "corp" as K AO1 R P, not "corporation"; "sep" as S EH1 P, not S-E-P.
@@ -1083,43 +923,9 @@ mod tests {
         );
         assert_eq!(lexicon.id("etc"), None);
         assert_eq!(lexicon.id("le"), None);
-        assert!(lexicon.id("people").is_some());
-    }
-
-    #[test]
-    fn the_committed_scowl_list_reads_and_grades() {
-        let scowl = CommonWords::read_levels(&repo("data/SCOWL/scowl-levels.tsv")).unwrap();
-        for word in ["monday", "jude", "online", "gonna", "american"] {
-            assert!(scowl.contains(word), "{word}");
-        }
-        for word in ["haar", "qi", "za"] {
-            assert!(!scowl.contains(word), "{word}");
-        }
-    }
-
-    #[test]
-    fn common_words_keep_listed_words_and_their_contractions() {
-        let common = CommonWords::parse(
-            "boy\nboys\nrunning\nlove\ncities\nit\ndo\nis\npeople\nem\ncause\nma\nam\nTexas\n",
-        );
-        for word in [
-            "boy", "boys", "running", "cities", "a", "i", "o", "boy's", "people's", "it's", "i'm",
-            "don't", "isn't", "can't", "won't", "'em", "'cause", "ma'am", "o'clock",
-        ] {
-            assert!(common.contains(word), "{word}");
-        }
-        // Listed forms only (no guessing at "loved"), and no names.
-        for word in [
-            "loved",
-            "boyd",
-            "b",
-            "texas",
-            "james's",
-            "o'brien",
-            "america's",
-            "doesn't",
-        ] {
-            assert!(!common.contains(word), "{word}");
-        }
+        assert_eq!(lexicon.id("sr"), None);
+        // Single letters but "a" and "i".
+        assert_eq!(lexicon.id("b"), None);
+        assert!(lexicon.id("a").is_some() && lexicon.id("people").is_some());
     }
 }

@@ -57,18 +57,16 @@ async function start(overrides: Partial<LexiconOptions>): Promise<void> {
   const options: LexiconOptions = { ...defaults().lexicon, ...overrides };
   data = import.meta.env.BASE_URL + 'data/';
   post({ type: 'status', message: 'Fetching CMUdict and word frequencies…' });
-  const [dict, frequencies, words, scowl, variants] = await Promise.all([
+  const [dict, frequencies, variants] = await Promise.all([
     fetch(data + 'cmudict-0.7b').then((r) => {
       if (!r.ok) throw new Error(`${data}cmudict-0.7b: HTTP ${r.status} (run \`npm run data\`)`);
       return r.arrayBuffer();
     }),
     fetchText(data + 'wordfreq-en.tsv', true),
-    fetchText(data + 'enable1.txt', false),
-    fetchText(data + 'scowl-levels.tsv', false),
     fetchText(data + 'varcon-to-american.tsv', false),
   ]);
   post({ type: 'status', message: 'Building the lexicon…' });
-  app = new MishearApp(new Uint8Array(dict), frequencies ?? '', undefined, words, scowl, options);
+  app = new MishearApp(new Uint8Array(dict), frequencies ?? '', undefined, options);
   if (variants !== undefined) app.setSpellingVariants(variants);
   lexicon = options;
   post({

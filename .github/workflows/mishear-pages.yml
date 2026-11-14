@@ -12,9 +12,7 @@ on:
       - crates/mishear/**
       - src/**
       - data/CMUdict/**
-      - data/ENABLE/**
       - data/VarCon/**
-      - data/SCOWL/**
       - data/echo/public/**
       - Cargo.toml
       - Cargo.lock

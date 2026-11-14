@@ -39,17 +39,7 @@ interface BoolKnob {
   info: string;
   heavy?: boolean;
 }
-interface ChoiceKnob {
-  type: 'choice';
-  key: string;
-  label: string;
-  hint: string;
-  /** The technical description, behind the knob's ⓘ button. */
-  info: string;
-  options: { value: string; label: string }[];
-  heavy?: boolean;
-}
-type Knob = NumberKnob | BoolKnob | ChoiceKnob;
+type Knob = NumberKnob | BoolKnob;
 type Group = 'search' | 'cost' | 'lexicon';
 
 const SEARCH_KNOBS: Knob[] = [
@@ -199,30 +189,6 @@ const LEXICON_KNOBS: Knob[] = [
   { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'How many of the most common words hearings can use.', info: 'The most frequent words kept from the word-frequency list, after the word list’s filter. Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
   { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Use every dictionary pronunciation of a word, not just the first.', info: 'Match each word under every CMUdict pronunciation (“either” as EE-ther and EYE-ther), or only its first. Changing it rebuilds the lexicon.', heavy: true },
   {
-    type: 'choice',
-    key: 'word_list',
-    label: 'word list',
-    hint: 'Which words count as real words.',
-    info: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, abbreviations (words said as their letters, “TV”, or spelled without a vowel, “Sr”; a clipped word is kept only as written: “corp” as “corp”, not “corporation”), and fragments and foreign function words (“ve”, “ing”, “le”, “der”, “que”).',
-    options: [
-      { value: 'enable', label: 'ENABLE' },
-      { value: 'scowl', label: 'SCOWL' },
-      { value: 'none', label: 'every word' },
-    ],
-    heavy: true,
-  },
-  {
-    type: 'number',
-    key: 'scowl_level',
-    label: 'SCOWL level',
-    hint: 'With SCOWL: how rare a word may be (higher allows rarer).',
-    info: 'With the SCOWL list: how rare a word may be. 35: common words; 50: a small dictionary’s; 60: a large one’s; 70–80: rare and obscure words (“haar”, “qi”).',
-    min: 10,
-    max: 80,
-    step: 5,
-    heavy: true,
-  },
-  {
     type: 'number',
     key: 'bigram_prior',
     label: 'bigram smoothing μ',
@@ -302,12 +268,7 @@ function upgrade(saved: Partial<State> | null): Partial<State> | null {
     const sweepKnob = saved.sweepKnob === 'search.lm_weight' ? 'search.fit' : saved.sweepKnob;
     saved = { ...saved, v: 4, search: search as unknown as SearchDto, sweepKnob };
   }
-  if (saved.v === 4) {
-    // Format 4 had an "ENABLE words only" switch; off kept every word.
-    const { common_words, ...lexicon } = (saved.lexicon ?? {}) as Record<string, unknown>;
-    if (common_words === false) lexicon.word_list = 'none';
-    saved = { ...saved, v: 5, lexicon: lexicon as unknown as LexiconOptions };
-  }
+  if (saved.v === 4) saved = { ...saved, v: 5 };
   return saved;
 }
 
@@ -324,8 +285,15 @@ function loadState(): State {
     // "only within cost" is gone from the page: the top N, always.
     search: { ...base.search, ...unsaved(saved.search), within: base.search.within },
     cost: { ...base.cost, ...unsaved(saved.cost) },
-    lexicon: { ...base.lexicon, ...unsaved(saved.lexicon) },
+    lexicon: { ...base.lexicon, ...withoutWordLists(unsaved(saved.lexicon)) },
   };
+}
+
+/** Lexicon options minus the word lists earlier formats chose between
+ * (ENABLE, SCOWL): every word is in now. */
+function withoutWordLists(lexicon: Partial<LexiconOptions>): Partial<LexiconOptions> {
+  const { common_words, word_list, scowl_level, ...kept } = lexicon as Record<string, unknown>;
+  return kept as Partial<LexiconOptions>;
 }
 
 /** `state` minus the knobs at their defaults (`null` marks an optional knob turned off). */
@@ -474,27 +442,6 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
     onChange();
   };
 
-  if (knob.type === 'choice') {
-    const select = el('select', {});
-    for (const option of knob.options) {
-      select.append(el('option', { value: option.value, textContent: option.label, selected: values[knob.key] === option.value }));
-    }
-    select.addEventListener('change', () => {
-      values[knob.key] = select.value;
-      commit();
-    });
-    reset.addEventListener('click', () => {
-      values[knob.key] = def;
-      select.value = String(def);
-      commit();
-    });
-    head.append(el('label', { className: 'name' }, `${knob.label} `, select), info.button, reset);
-    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }), info.text);
-    wrap.dataset.key = knob.key;
-    markChanged();
-    return wrap;
-  }
-
   if (knob.type === 'bool') {
     const box = el('input', { type: 'checkbox', checked: Boolean(values[knob.key]) });
     box.addEventListener('change', () => {
@@ -580,15 +527,6 @@ function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement): void 
       }),
     ),
   );
-  if (group === 'lexicon' && lexiconInfo) {
-    const missing: Record<string, boolean> = { enable: !lexiconInfo.enable_available, scowl: !lexiconInfo.scowl_available };
-    for (const option of container.querySelectorAll<HTMLOptionElement>('[data-key="word_list"] option')) {
-      if (missing[option.value]) {
-        option.disabled = true;
-        option.title = 'Its word list wasn’t found (see `npm run data`).';
-      }
-    }
-  }
 }
 
 // -------------------------------------------------------------- results ----
@@ -857,8 +795,7 @@ function renderLexiconInfo(): void {
   if (!lexiconInfo) return;
   const i = lexiconInfo;
   $('lexicon-info').textContent =
-    `${thousands(i.words)} words, ${thousands(i.trie_nodes)} trie nodes; ${i.bigrams ? `${thousands(i.bigram_pairs)} word pairs loaded` : 'word-pair counts not loaded'}; ` +
-    `ENABLE ${i.enable_available ? 'loaded' : 'not found'}, SCOWL ${i.scowl_available ? 'loaded' : 'not found'}` +
+    `${thousands(i.words)} words, ${thousands(i.trie_nodes)} trie nodes; ${i.bigrams ? `${thousands(i.bigram_pairs)} word pairs loaded` : 'word-pair counts not loaded'}` +
     (engineMemoryMb ? `; engine memory ${Math.round(engineMemoryMb)} MB.` : '.');
 }
 

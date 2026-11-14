@@ -52,27 +52,11 @@ python3 -m venv /tmp/wfenv && /tmp/wfenv/bin/pip install wordfreq
 crates/mishear/scripts/google_bigrams.sh
 ```
 
-`--word-list` (the page's "word list") picks which words hearings may use,
-besides contractions and possessives of them ("it's", "don't", "people's"):
-
-- **`enable`**: the ENABLE word list
-  ([`data/ENABLE`](../../data/ENABLE), public domain, committed), as in
-  rhyme-golf. No names, brands or abbreviations, and every inflected form
-  ("heard", "women"), but it is a Scrabble list: it keeps "haar", "qi" and
-  "gae", and lacks days and months, nationalities, places, and recent words
-  ("email", "online").
-- **`scowl`**: SCOWL's words ([`data/SCOWL`](../../data/SCOWL), from the
-  spell-checker word lists VarCon belongs to; permissive license,
-  committed) up to `--scowl-level` (default 60). Levels run from 10, the
-  most common words, to 80: 35 holds "monday", "email" and "gonna"; 50
-  "jude", "london" and "online"; 70–80 "haar", "qi" and "za". Names,
-  places, days and months are in; abbreviations aren't.
-  `scripts/scowl_levels.py` regenerates the list (the words CMUdict can
-  pronounce, with their lowest level).
-- **`none`** (default, or `--all-words`): every word frequent enough to be
-  in the vocabulary, brands and foreign names included.
-
-`scowl` and `none` also drop:
+Hearings may use every word in the vocabulary (the most frequent words
+CMUdict can pronounce, `--vocab`), brands, names and places included, and
+contractions and possessives of them. Frequency, not a curated word list,
+keeps out the obscure: past the familiar words, rarity costs (see "The edge
+of the vocabulary"). The lexicon leaves out only:
 
 - single letters but "a" and "I";
 - words spelled without a vowel letter, which CMUdict reads as the word
@@ -86,6 +70,10 @@ besides contractions and possessives of them ("it's", "don't", "people's"):
 - fragments and foreign function words that are frequent in wordfreq's
   list: "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und",
   "su", "tu", "sa", "wa", "vi", "fi".
+
+Earlier versions filtered the lexicon by the ENABLE word list (a Scrabble
+list: no names, but "haar" and "qi") or by SCOWL's graded lists; with the
+vocabulary edge, neither earned its place.
 
 VarCon's spelling variants ([`data/VarCon`](../../data/VarCon), from SCOWL,
 permissive license, committed) map British, Canadian and Australian
@@ -162,7 +150,7 @@ What the page has:
 - **Saving:** settings are kept in localStorage, and "Copy link" puts them in
   the URL.
 
-`npm run data` symlinks CMUdict, ENABLE, SCOWL, VarCon and the generated word lists into
+`npm run data` symlinks CMUdict, VarCon and the generated word lists into
 `public/data`, which is gitignored, and gzips the packed word-pair counts
 there; the page unzips them as they arrive. A build
 copies them into `dist/`. That copy includes the wordfreq list, which is CC
@@ -672,10 +660,6 @@ These use public-domain lines from `data/echo/public` (`examples --public
   as a trigram model or a small neural rescorer over the top 50, would go
   further. The backoff could also try Kneser–Ney's continuation counts
   rather than wordfreq's frequencies.
-- **Which word list?** ENABLE drops days, months, names and recent words
-  ("june", "jude", "email", "online") and keeps Scrabble words ("haar",
-  "qi"); `--word-list scowl` and `none` are there to compare against it
-  (see "Setup").
 - **Snapping chooses one vowel.** The research suggests emitting the
   near-ties as weighted alternatives, which is exactly where mishearings come
   from.

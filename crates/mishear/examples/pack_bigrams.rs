@@ -1,6 +1,6 @@
 //! Packs word-pair counts (text or packed) for the search: keeps the pairs
 //! whose words can be in the lexicon (CMUdict's, from the frequency list,
-//! in the ENABLE list unless `--all-words`), optionally only the `--keep N`
+//! that `mishear::lexicon::admits`), optionally only the `--keep N`
 //! most informative, and writes the packed format (see
 //! `mishear::bigrams::BigramTable::write_packed`), a tenth the size of the
 //! text.
@@ -19,11 +19,11 @@ use std::path::Path;
 use mime_reader::CmuDictionary;
 use mishear::Lexicon;
 use mishear::bigrams::BigramTable;
-use mishear::lexicon::{CommonWords, read_frequencies};
+use mishear::lexicon::{admits, read_frequencies};
 
 fn main() -> Result<(), String> {
     let mut positional = Vec::new();
-    let (mut keep, mut score_mu, mut all_words) = (None, 100_000.0f64, false);
+    let (mut keep, mut score_mu) = (None, 100_000.0f64);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -34,20 +34,18 @@ fn main() -> Result<(), String> {
                     .and_then(|v| v.parse().ok())
                     .ok_or("--score-mu F")?
             }
-            "--all-words" => all_words = true,
             _ => positional.push(arg),
         }
     }
     let [input, output] = positional.as_slice() else {
-        return Err("usage: pack_bigrams IN OUT [--keep N] [--score-mu F] [--all-words]".into());
+        return Err("usage: pack_bigrams IN OUT [--keep N] [--score-mu F]".into());
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dict = CmuDictionary::load(root.join("../../data/CMUdict/cmudict-0.7b"))
         .map_err(|e| e.to_string())?;
     let frequencies = read_frequencies(&root.join("data/wordfreq-en.tsv"))?;
-    let common = CommonWords::read(&root.join("../../data/ENABLE/enable1.txt"))?;
-    let lexicon = Lexicon::build(&dict, &frequencies, usize::MAX, true, |w, _| {
-        all_words || common.contains(w)
+    let lexicon = Lexicon::build(&dict, &frequencies, usize::MAX, true, |w, p| {
+        admits(&dict, w, p)
     });
     let words: HashSet<&str> = (0..lexicon.len() as u32).map(|w| lexicon.word(w)).collect();
     // `−ln P(w)`, for the information score.
