@@ -239,19 +239,42 @@ const VOWELLESS_WORDS: [&str; 12] = [
     "hmm", "hm", "mm", "mmm", "shh", "sh", "psst", "brr", "pfft", "tsk", "grr", "zzz",
 ];
 
-/// Frequent in wordfreq's English list, but not English words: fragments
-/// of words split apart ("ve", "ing") and foreign function words ("le",
-/// "der", "que").
-const NOT_WORDS: [&str; 16] = [
-    "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und", "su", "tu", "sa", "wa", "vi",
-    "fi",
+/// Foreign function words and syllables, frequent in wordfreq's English
+/// list: "le", "der", "que", "un", "et".
+const FOREIGN: [&str; 53] = [
+    "de", "et", "un", "el", "da", "en", "von", "te", "das", "ja", "je", "bon", "sur", "cha", "wo",
+    "mal", "ala", "om", "xi", "sri", "yi", "ji", "fu", "ki", "ka", "ku", "lu", "yu", "ju", "hu",
+    "ou", "ko", "ia", "isa", "ari", "ul", "ang", "yan", "wal", "le", "des", "du", "der", "il",
+    "est", "que", "und", "su", "tu", "sa", "wa", "vi", "fi",
+];
+
+/// Fragments of longer words, split apart in wordfreq's text: "ve",
+/// "ing", "pre", "im".
+const FRAGMENTS: [&str; 28] = [
+    "ve", "ing", "pre", "im", "ons", "mis", "tri", "sci", "eng", "ev", "av", "og", "ot", "aus",
+    "ar", "ab", "del", "sen", "tel", "alt", "res", "dom", "rom", "pos", "org", "lan", "cal", "pac",
+];
+
+/// Clipped words, read as written but standing for longer ones: "gov",
+/// "corp", "sec", "app".
+const CLIPPED: [&str; 28] = [
+    "co", "inc", "corp", "admin", "min", "nov", "sep", "gov", "gen", "com", "op", "mon", "med",
+    "reg", "dev", "sec", "mic", "pic", "app", "bot", "abs", "mag", "uni", "bio", "rec", "ole",
+    "quo", "cos",
+];
+
+/// Short names: "sam", "jo", "kai".
+const SHORT_NAMES: [&str; 16] = [
+    "sam", "dan", "jo", "mac", "abu", "bo", "jin", "kai", "kat", "vic", "rey", "liu", "wes", "jen",
+    "raf", "raj",
 ];
 
 /// Whether the lexicon admits `word` read as `pronunciation`: every word
 /// frequent enough is in but single letters other than "a" and "i", words
 /// that are never words ([`not_a_word`]: "sr", "le"), and readings of a word
 /// as an abbreviation ([`abbreviated`]: "tv", "etc" as et cetera). A word
-/// read as written keeps that reading ("corp" as K AO1 R P).
+/// read as written keeps that reading ("rep" as R EH1 P, not
+/// representative).
 pub fn admits<D: PronouncingDictionary + ?Sized>(
     dict: &D,
     word: &str,
@@ -261,23 +284,27 @@ pub fn admits<D: PronouncingDictionary + ?Sized>(
     !single_letter && !not_a_word(word) && !abbreviated(dict, word, pronunciation)
 }
 
-/// Whether `word` is never a word, however it's said: spelled without a
-/// vowel letter, as abbreviations are ("sr", "mr", "lbs", "blvd";
-/// interjections such as "hmm" and "shh" aside), or a fragment or foreign
-/// function word ([`NOT_WORDS`]).
+/// Whether `word` is never a word for the lexicon, however it's said:
+/// spelled without a vowel letter, as abbreviations are ("sr", "mr", "lbs",
+/// "blvd"; interjections such as "hmm" and "shh" aside), or on one of the
+/// hand-made lists: [`FOREIGN`] words, [`FRAGMENTS`], [`CLIPPED`] words and
+/// [`SHORT_NAMES`].
 pub fn not_a_word(word: &str) -> bool {
     let base = word.split('\'').next().unwrap_or(word);
     let vowelless = base.len() > 1
         && !base.contains(['a', 'e', 'i', 'o', 'u', 'y'])
         && !VOWELLESS_WORDS.contains(&base);
-    vowelless || NOT_WORDS.contains(&base)
+    vowelless
+        || [&FOREIGN[..], &FRAGMENTS, &CLIPPED, &SHORT_NAMES]
+            .iter()
+            .any(|list| list.contains(&base))
 }
 
 /// Whether `pronunciation` reads `word` as an abbreviation: as its
 /// letters' names ("tv"; see [`said_as_letters`]), or as the longer word it
 /// stands for, three phonemes or more beyond its letters ("etc" as et
-/// cetera, "corp" as corporation, "feb"). Read as written ("corp" as K AO1
-/// R P, "gov", "min"), it isn't.
+/// cetera, "rep" as representative, "feb"). Read as written ("rep" as R EH1
+/// P), it isn't.
 pub fn abbreviated<D: PronouncingDictionary + ?Sized>(
     dict: &D,
     word: &str,
@@ -886,13 +913,14 @@ mod tests {
     #[test]
     fn abbreviations_are_told_from_words() {
         for word in [
-            "sr", "mr", "mrs", "lbs", "blvd", "tv", "tv's", "uk", "etc", "le", "ing",
+            "sr", "mr", "mrs", "lbs", "blvd", "tv", "tv's", "uk", "etc", "le", "ing", "un", "et",
+            "corp", "app", "jo",
         ] {
             assert!(abbreviation(cmudict(), word), "{word}");
         }
-        // Words, and abbreviations with a pronunciation read as written.
+        // Words, interjections, and abbreviations with a reading as written.
         for word in [
-            "hmm", "shh", "my", "gym", "sister", "senior", "okay", "corp", "sep", "gov", "min",
+            "hmm", "shh", "er", "my", "gym", "sister", "senior", "okay", "rep",
         ] {
             assert!(!abbreviation(cmudict(), word), "{word}");
         }
@@ -900,7 +928,7 @@ mod tests {
 
     #[test]
     fn the_lexicon_admits_words_and_abbreviations_only_as_written() {
-        let frequencies: Vec<Frequency> = ["corp", "sep", "etc", "le", "people", "a", "b", "sr"]
+        let frequencies: Vec<Frequency> = ["rep", "corp", "etc", "le", "people", "a", "b", "sr"]
             .iter()
             .map(|w| Frequency {
                 word: w.to_string(),
@@ -912,15 +940,13 @@ mod tests {
             admits(dict, w, p)
         });
         let first = |w: &str| Ph::parse_all(w).unwrap();
-        // "corp" as K AO1 R P, not "corporation"; "sep" as S EH1 P, not S-E-P.
+        // "rep" as R EH1 P, not "representative".
         assert_eq!(
-            lexicon.first_pronunciation(lexicon.id("corp").unwrap()),
-            first("K AO1 R P")
+            lexicon.first_pronunciation(lexicon.id("rep").unwrap()),
+            first("R EH1 P")
         );
-        assert_eq!(
-            lexicon.first_pronunciation(lexicon.id("sep").unwrap()),
-            first("S EH1 P")
-        );
+        // A clipped word on the list is out however it's read.
+        assert_eq!(lexicon.id("corp"), None);
         assert_eq!(lexicon.id("etc"), None);
         assert_eq!(lexicon.id("le"), None);
         assert_eq!(lexicon.id("sr"), None);

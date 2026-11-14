@@ -186,7 +186,7 @@ const COST_KNOBS: Knob[] = [
 ];
 
 const LEXICON_KNOBS: Knob[] = [
-  { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'How many of the most common words hearings can use.', info: 'The most frequent words kept from the word-frequency list, after the word list’s filter. Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
+  { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'How many of the most common words hearings can use.', info: 'The most frequent words kept from the word-frequency list. Every frequent word is in, names and brands included, but single letters other than “a” and “I”; abbreviations (said as letters, “TV”; spelled without a vowel, “Sr”; read as the longer word, “etc”); and hand-made lists of foreign words (“le”, “un”), fragments (“ve”, “ing”), clipped words (“gov”, “app”) and short names (“jo”). Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
   { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Use every dictionary pronunciation of a word, not just the first.', info: 'Match each word under every CMUdict pronunciation (“either” as EE-ther and EYE-ther), or only its first. Changing it rebuilds the lexicon.', heavy: true },
   {
     type: 'number',

@@ -88,9 +88,10 @@ SEARCH OPTIONS
                      frequent word is in, but single letters other than 'a'
                      and 'i'; abbreviations: words said as their letters
                      ('tv', 'uk') or spelled without a vowel ('sr', 'lbs'),
-                     keeping a clipped word only as written ('corp', not
-                     'corporation'); and fragments and foreign function
-                     words ('ve', 'ing', 'le', 'der', 'que')
+                     keeping a word's reading as written ('rep', not
+                     'representative'); and hand-made lists of foreign
+                     words ('le', 'que', 'un'), fragments ('ve', 'ing'),
+                     clipped words ('gov', 'app') and short names ('jo')
   --unigram          --fit 0, whatever else is given: score each word alone,
                      exactly and faster. Otherwise fit uses word-pair counts
                      from Google Books fiction (data/bigrams-en.bin; see

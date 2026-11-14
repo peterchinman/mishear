@@ -63,13 +63,20 @@ of the vocabulary"). The lexicon leaves out only:
   they stand for ("sr" as "senior", "mr", "lbs"), interjections such as
   "hmm" and "shh" aside;
 - pronunciations that read a word as an abbreviation: as its letters'
-  names ("tv", "uk", "ok"; "sep" as S-E-P), or as the longer word it stands
-  for, three phonemes or more beyond its letters ("etc" as et cetera,
-  "corp" as corporation, "feb"). A word read as written keeps that reading
-  ("corp" as K AO1 R P, "sep", "gov", "min");
-- fragments and foreign function words that are frequent in wordfreq's
-  list: "ve", "ing", "le", "des", "du", "der", "il", "est", "que", "und",
-  "su", "tu", "sa", "wa", "vi", "fi".
+  names ("tv", "uk", "ok"), or as the longer word it stands for, three
+  phonemes or more beyond its letters ("etc" as et cetera, "rep" as
+  representative, "feb"). A word read as written keeps that reading ("rep"
+  as R EH1 P);
+- four hand-made lists (`lexicon.rs`), of words wordfreq finds frequent
+  but which act as free gap-fillers in hearings:
+  - foreign function words and syllables: "le", "der", "que", "un", "et",
+    "de", "el", "von", "das", …;
+  - fragments of longer words: "ve", "ing", "pre", "im", "ons", "tri", …;
+  - clipped words: "co", "inc", "corp", "admin", "gov", "min", "sec",
+    "app", "bot", "abs", …;
+  - short names: "sam", "dan", "jo", "mac", "kai", "jen", ….
+
+  Interjections ("er", "hmm", "ooh", "aw", "nah") stay.
 
 Earlier versions filtered the lexicon by the ENABLE word list (a Scrabble
 list: no names, but "haar" and "qi") or by SCOWL's graded lists; with the
