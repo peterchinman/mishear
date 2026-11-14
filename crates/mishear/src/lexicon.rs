@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use mime_reader::PronouncingDictionary;
+use mime_reader::{InflectionRule, PronouncingDictionary, inflection_bases};
 
 use crate::bigrams::{BigramTable, dequantize};
 use crate::phone::Ph;
@@ -34,8 +34,16 @@ pub struct Lexicon {
     /// the same ("there", "their", "they're").
     sound: Vec<u32>,
     first: Vec<Vec<Ph>>,
-    /// The words sharing each [`stem`].
+    /// The words sharing each stem (see [`Self::same_stem`]).
     by_stem: HashMap<String, Vec<WordId>>,
+    /// Each word's same-word class (see [`Self::same_word`]), and the
+    /// classes by key.
+    same: Vec<u32>,
+    classes: Vec<Vec<WordId>>,
+    class_by_key: HashMap<String, u32>,
+    /// Each word's stem, keyed by its same-word key.
+    stems: Vec<String>,
+    variants: Arc<SpellingVariants>,
     /// The words with each sound (see [`Self::sound`]).
     by_sound: Vec<Vec<WordId>>,
 }
@@ -45,8 +53,120 @@ pub struct Lexicon {
 pub fn stem(word: &str) -> String {
     use rust_stemmers::{Algorithm, Stemmer};
     Stemmer::create(Algorithm::English)
-        .stem(&word.to_lowercase())
+        .stem(&spelling(word))
         .into_owned()
+}
+
+/// A word as the lexicon spells it: lowercase, with straight apostrophes
+/// (prose editors type "neighbor’s").
+pub fn spelling(word: &str) -> String {
+    word.to_lowercase().replace(['’', '‘'], "'")
+}
+
+/// British, Canadian, Australian and variant spellings, each with the
+/// preferred American spelling of the same word ("neighbour's" →
+/// "neighbor's"), from VarCon: `data/VarCon/varcon-to-american.tsv`.
+#[derive(Debug, Default, Clone)]
+pub struct SpellingVariants {
+    american: HashMap<String, String>,
+}
+
+impl SpellingVariants {
+    /// Reads `variant<TAB>american` lines.
+    pub fn read(path: &Path) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Self::parse(&text)
+    }
+
+    /// [`Self::read`] from the file's text.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut american = HashMap::new();
+        for (n, line) in text.lines().enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+            let (variant, preferred) = line.split_once('\t').ok_or_else(|| {
+                format!("spelling variants, line {}: expected two columns", n + 1)
+            })?;
+            american.insert(spelling(variant), spelling(preferred));
+        }
+        Ok(Self { american })
+    }
+
+    /// The American spelling of `word` (lowercase, straight apostrophes),
+    /// or `word` itself.
+    pub fn american<'a>(&'a self, word: &'a str) -> &'a str {
+        self.american.get(word).map_or(word, String::as_str)
+    }
+
+    pub fn len(&self) -> usize {
+        self.american.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.american.is_empty()
+    }
+}
+
+/// The layers a word may carry and still be the same word: possessives and
+/// plurals ("music's", "neighbours'", "knives").
+const SAME_WORD_RULES: [InflectionRule; 4] = [
+    InflectionRule::ApostropheS,
+    InflectionRule::SApostrophe,
+    InflectionRule::S,
+    InflectionRule::Ves,
+];
+
+/// Words whose 's is "is" or "has" ("it's", "let's"), not a possessive.
+const CONTRACTING: [&str; 14] = [
+    "he", "she", "it", "this", "that", "there", "here", "what", "who", "where", "when", "why",
+    "how", "let",
+];
+
+/// Spelled and pronounced as a plural of the second word, but a word of
+/// its own.
+const NOT_PLURALS: [(&str, &str); 1] = [("news", "new")];
+
+/// The word `word` is a form of, for telling hearings that give the line's
+/// own words back: possessive and plural layers peeled off, the spelling
+/// made American. "neighbours'", "neighbour's" and "neighbors" all give
+/// "neighbor".
+///
+/// A layer is peeled only when the word sounds like its base with the
+/// suffix added: "does" isn't "doe" + s. The 's of a contraction ("it's",
+/// "let's") stays.
+pub fn same_word_key<D: PronouncingDictionary + ?Sized>(
+    dict: &D,
+    variants: &SpellingVariants,
+    word: &str,
+) -> String {
+    let mut word = spelling(word);
+    // Each step makes the spelling American or peels a layer; a word
+    // carries few of either.
+    for _ in 0..6 {
+        let american = variants.american(&word);
+        if american != word {
+            word = american.to_string();
+            continue;
+        }
+        let Some(own) = dict.pronunciations_for(&word) else {
+            break;
+        };
+        let base = inflection_bases(dict, &word).into_iter().find(|b| {
+            SAME_WORD_RULES.contains(&b.rule)
+                && !(b.rule == InflectionRule::ApostropheS
+                    && CONTRACTING.contains(&b.base.as_str()))
+                && !NOT_PLURALS.contains(&(word.as_str(), b.base.as_str()))
+                && b.pronunciations
+                    .iter()
+                    .any(|p| own.pronunciations.contains(p))
+        });
+        match base {
+            Some(b) => word = spelling(&b.base),
+            None => break,
+        }
+    }
+    word
 }
 
 /// The bigram model over this lexicon: a [`BigramTable`] seen through the
@@ -186,6 +306,11 @@ impl Lexicon {
             first: Vec::new(),
             by_stem: HashMap::new(),
             by_sound: Vec::new(),
+            same: Vec::new(),
+            classes: Vec::new(),
+            class_by_key: HashMap::new(),
+            stems: Vec::new(),
+            variants: Arc::default(),
         };
         let mut sounds: HashMap<Vec<Ph>, u32> = HashMap::new();
         for frequency in frequencies {
@@ -208,7 +333,6 @@ impl Lexicon {
                 .surprisal
                 .push((9.0 - frequency.zipf) * std::f32::consts::LN_10);
             lexicon.index.insert(word.to_string(), id);
-            lexicon.by_stem.entry(stem(word)).or_default().push(id);
             let first: Vec<Ph> = pronunciations[0].iter().map(Ph::from_phoneme).collect();
             let next = sounds.len() as u32;
             lexicon
@@ -234,7 +358,53 @@ impl Lexicon {
                 }
             }
         }
+        lexicon.group_forms(dict);
         lexicon
+    }
+
+    /// Spells words the American way when telling whether they are the
+    /// same word or share a stem: "neighbour's" is then "neighbor".
+    pub fn set_spelling_variants<D: PronouncingDictionary + ?Sized>(
+        &mut self,
+        dict: &D,
+        variants: Arc<SpellingVariants>,
+    ) {
+        self.variants = variants;
+        self.group_forms(dict);
+    }
+
+    pub fn spelling_variants(&self) -> Arc<SpellingVariants> {
+        self.variants.clone()
+    }
+
+    /// Fills the same-word classes and the stems from each word's
+    /// [`same_word_key`].
+    fn group_forms<D: PronouncingDictionary + ?Sized>(&mut self, dict: &D) {
+        self.same.clear();
+        self.classes.clear();
+        self.class_by_key.clear();
+        self.stems.clear();
+        self.by_stem.clear();
+        for id in 0..self.words.len() {
+            let key = self.key(dict, &self.words[id]);
+            let next = self.classes.len() as u32;
+            let class = *self.class_by_key.entry(key.clone()).or_insert(next);
+            if class == next {
+                self.classes.push(Vec::new());
+            }
+            self.classes[class as usize].push(id as WordId);
+            self.same.push(class);
+            let root = stem(&key);
+            self.by_stem
+                .entry(root.clone())
+                .or_default()
+                .push(id as WordId);
+            self.stems.push(root);
+        }
+    }
+
+    fn key<D: PronouncingDictionary + ?Sized>(&self, dict: &D, word: &str) -> String {
+        same_word_key(dict, &self.variants, word)
     }
 
     fn insert(&mut self, phonemes: &[Ph], word: WordId) {
@@ -279,7 +449,7 @@ impl Lexicon {
     }
 
     pub fn id(&self, word: &str) -> Option<WordId> {
-        self.index.get(&word.to_lowercase()).copied()
+        self.index.get(&spelling(word)).copied()
     }
 
     /// Every word that sounds like `id` (by first pronunciation), `id`
@@ -288,9 +458,35 @@ impl Lexicon {
         &self.by_sound[self.sound(id) as usize]
     }
 
-    /// Every word with `word`'s [`stem`], `word` itself included.
-    pub fn same_stem(&self, word: &str) -> &[WordId] {
-        self.by_stem.get(&stem(word)).map_or(&[], Vec::as_slice)
+    /// Every form of `word` in the lexicon, `word` itself included: its
+    /// possessives and plurals, in any spelling ("neighbor", "neighbour's",
+    /// "neighbors'"). See [`same_word_key`]. `dict` pronounces `word`,
+    /// which needn't be in the lexicon.
+    pub fn same_word<D: PronouncingDictionary + ?Sized>(&self, dict: &D, word: &str) -> &[WordId] {
+        self.class_by_key
+            .get(&self.key(dict, word))
+            .map_or(&[], |&c| &self.classes[c as usize])
+    }
+
+    /// [`Self::same_word`] for a lexicon word.
+    pub fn same_word_of(&self, id: WordId) -> &[WordId] {
+        &self.classes[self.same[id as usize] as usize]
+    }
+
+    /// Every word sharing `word`'s stem, `word` itself included: the
+    /// [`stem`] of its [`same_word_key`], so "neighbourly" shares
+    /// "neighbor"'s.
+    pub fn same_stem<D: PronouncingDictionary + ?Sized>(&self, dict: &D, word: &str) -> &[WordId] {
+        self.by_stem
+            .get(&stem(&self.key(dict, word)))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// [`Self::same_stem`] for a lexicon word.
+    pub fn same_stem_of(&self, id: WordId) -> &[WordId] {
+        self.by_stem
+            .get(&self.stems[id as usize])
+            .map_or(&[], Vec::as_slice)
     }
 
     /// `−ln P(word)`: about 3 for "the", 8 for "nice", 15 for "aardvark".
@@ -450,6 +646,145 @@ impl Lexicon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mime_reader::{CmuDictionary, ConfiguredDictionary, PronunciationMode};
+    use std::sync::OnceLock;
+
+    fn repo(relative: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(relative)
+    }
+
+    fn cmudict() -> &'static ConfiguredDictionary<CmuDictionary> {
+        static DICT: OnceLock<ConfiguredDictionary<CmuDictionary>> = OnceLock::new();
+        DICT.get_or_init(|| {
+            CmuDictionary::load(repo("data/CMUdict/cmudict-0.7b"))
+                .unwrap()
+                .with_pronunciation_mode(PronunciationMode::AllowDerived)
+        })
+    }
+
+    fn varcon() -> Arc<SpellingVariants> {
+        static VARIANTS: OnceLock<Arc<SpellingVariants>> = OnceLock::new();
+        VARIANTS
+            .get_or_init(|| {
+                Arc::new(
+                    SpellingVariants::read(&repo("data/VarCon/varcon-to-american.tsv")).unwrap(),
+                )
+            })
+            .clone()
+    }
+
+    fn key(word: &str) -> String {
+        same_word_key(cmudict(), &varcon(), word)
+    }
+
+    #[test]
+    fn possessives_plurals_and_spellings_share_a_key() {
+        for word in ["music", "music's", "musics"] {
+            assert_eq!(key(word), "music", "{word}");
+        }
+        for word in [
+            "neighbour",
+            "neighbour's",
+            "neighbours",
+            "neighbours'",
+            "neighbor",
+            "neighbor's",
+            "neighbors",
+            "neighbors'",
+            "neighbour’s",
+            "Neighbour's",
+        ] {
+            assert_eq!(key(word), "neighbor", "{word}");
+        }
+        for word in ["colour", "colours", "color"] {
+            assert_eq!(key(word), "color", "{word}");
+        }
+        assert_eq!(key("grey"), key("gray"));
+        assert_eq!(key("people's"), "people");
+        assert_eq!(key("knives"), "knife");
+    }
+
+    #[test]
+    fn lookalikes_and_contractions_keep_their_own_key() {
+        // Other words of the same stem stay apart.
+        assert_eq!(key("musical"), "musical");
+        // Spelled like a plural, but pronounced otherwise.
+        assert_eq!(key("does"), "does");
+        // Contractions, not possessives.
+        assert_eq!(key("it's"), "it's");
+        assert_eq!(key("let's"), "let's");
+        assert_eq!(key("news"), "news");
+        // Homophones are different words.
+        assert_ne!(key("their"), key("there"));
+    }
+
+    #[test]
+    fn spelling_variants_map_to_american_spellings_in_one_step() {
+        let variants = varcon();
+        for (variant, american) in [
+            ("colour", "color"),
+            ("neighbour", "neighbor"),
+            ("neighbour's", "neighbor's"),
+            ("theatre", "theater"),
+            ("grey", "gray"),
+        ] {
+            assert_eq!(variants.american(variant), american);
+        }
+        for (variant, american) in &variants.american {
+            assert_ne!(variant, american);
+            // A target is never itself mapped, so one lookup suffices.
+            assert_eq!(variants.american(american), american.as_str(), "{variant}");
+        }
+        assert!(SpellingVariants::parse("colour color\n").is_err());
+    }
+
+    /// A lexicon of `words` under the real CMUdict, most frequent first.
+    fn lexicon_of(words: &[&str]) -> Lexicon {
+        let frequencies: Vec<Frequency> = words
+            .iter()
+            .enumerate()
+            .map(|(k, word)| Frequency {
+                word: word.to_string(),
+                zipf: 7.0 - k as f32 * 0.01,
+            })
+            .collect();
+        let mut lexicon = Lexicon::build(cmudict(), &frequencies, usize::MAX, false, |_| true);
+        lexicon.set_spelling_variants(cmudict(), varcon());
+        lexicon
+    }
+
+    #[test]
+    fn the_lexicon_groups_each_word_with_its_forms() {
+        let lexicon = lexicon_of(&[
+            "music",
+            "music's",
+            "musical",
+            "neighbor",
+            "neighbors",
+            "neighbor's",
+            "their",
+            "there",
+        ]);
+        let id = |w: &str| lexicon.id(w).unwrap();
+        let mut forms = lexicon.same_word_of(id("music's")).to_vec();
+        forms.sort();
+        assert_eq!(forms, [id("music"), id("music's")]);
+        // Words outside the lexicon find their forms in it.
+        let mut forms = lexicon.same_word(cmudict(), "Neighbour’s").to_vec();
+        forms.sort();
+        assert_eq!(forms, [id("neighbor"), id("neighbors"), id("neighbor's")]);
+        assert_eq!(lexicon.same_word_of(id("their")), [id("their")]);
+        // Stems are taken from the same-word key.
+        assert!(lexicon.same_stem_of(id("musical")).contains(&id("music")));
+        assert!(
+            lexicon
+                .same_stem(cmudict(), "neighbourly")
+                .contains(&id("neighbor"))
+        );
+        assert_eq!(lexicon.id("neighbor’s"), lexicon.id("neighbor's"));
+    }
 
     #[test]
     fn common_words_keep_listed_words_and_their_contractions() {

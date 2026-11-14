@@ -14,7 +14,9 @@ use mime_reader::{
 use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::deform::Deformation;
-use crate::lexicon::{CommonWords, Frequency, Lexicon, WordId, read_frequencies};
+use crate::lexicon::{
+    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, read_frequencies, spelling,
+};
 use crate::phone::Ph;
 use crate::search::{
     Lattice, Match, SearchConfig, SearchStats, best_matches, beyond, cheapest, lattice, next_bound,
@@ -168,7 +170,16 @@ impl Engine {
         Self::with_lexicon(dict, lexicon)
     }
 
-    /// Rebuilds the lexicon, keeping its word-pair counts.
+    /// Treats British, Canadian and Australian spellings as the American
+    /// one when telling the line's words, and earlier hearings', apart from
+    /// new ones.
+    pub fn set_spelling_variants(&mut self, variants: SpellingVariants) {
+        self.lexicon
+            .set_spelling_variants(&self.dict, std::sync::Arc::new(variants));
+    }
+
+    /// Rebuilds the lexicon, keeping its word-pair counts and spelling
+    /// variants.
     pub fn rebuild_lexicon(
         &mut self,
         frequencies: &[Frequency],
@@ -177,6 +188,7 @@ impl Engine {
         common: Option<&CommonWords>,
     ) {
         let bigrams = self.lexicon.bigram_table();
+        let variants = self.lexicon.spelling_variants();
         self.lexicon = Lexicon::build(
             &self.dict,
             frequencies,
@@ -184,6 +196,7 @@ impl Engine {
             all_pronunciations,
             |w| common.is_none_or(|c| c.contains(w)),
         );
+        self.lexicon.set_spelling_variants(&self.dict, variants);
         if let Some((table, prior)) = bigrams {
             self.lexicon.attach_bigrams(table, prior);
         }
@@ -210,7 +223,7 @@ impl Engine {
         for word in &line.words {
             match &word.data {
                 WordData::Known { pronunciations, .. } => {
-                    reading.words.push(word.word.to_lowercase());
+                    reading.words.push(spelling(&word.word));
                     reading.phonemes.push(
                         pronunciations[0]
                             .phonemes
@@ -272,7 +285,9 @@ impl Engine {
                     chosen: &mut Vec<(Match, usize)>| {
             let reused = m.words.iter().filter(|w| used.contains(w)).count();
             for &w in &m.words {
-                used.extend(self.lexicon.homophones(w));
+                for &f in self.lexicon.same_word_of(w) {
+                    used.extend(self.lexicon.homophones(f));
+                }
             }
             seen.push(sounds(&m));
             chosen.push((m, reused));
@@ -377,16 +392,19 @@ impl Engine {
                             } else {
                                 1.0
                             };
-                            for &h in self.lexicon.homophones(w) {
-                                let entry = penalty.entry(h).or_default();
-                                *entry = entry.max(variety.variety * share);
+                            // Every form of the word, and their homophones
+                            // too, so every spelling of a sound pays alike:
+                            // pass 2 keeps one spelling per sound, and the
+                            // pool's rescoring relies on that one staying the
+                            // cheapest.
+                            for &f in self.lexicon.same_word_of(w) {
+                                for &h in self.lexicon.homophones(f) {
+                                    let entry = penalty.entry(h).or_default();
+                                    *entry = entry.max(variety.variety * share);
+                                }
                             }
                             if variety.root > 0.0 {
-                                // Their homophones too, so every spelling of a
-                                // sound pays alike: pass 2 keeps one spelling
-                                // per sound, and the pool's rescoring relies on
-                                // that one staying the cheapest.
-                                for &s in self.lexicon.same_stem(self.lexicon.word(w)) {
+                                for &s in self.lexicon.same_stem_of(w) {
                                     for &h in self.lexicon.homophones(s) {
                                         let entry = stem_penalty.entry(h).or_default();
                                         *entry = entry.max(variety.root * share);
@@ -431,25 +449,32 @@ impl Engine {
         let deformed = deformation.apply_spelled(&reading.phonemes, &reading.words);
         let input: Vec<Ph> = deformed.iter().flatten().copied().collect();
         let mut search = config.search.clone();
-        let originals: Vec<WordId> = reading
-            .words
-            .iter()
-            .filter_map(|w| self.lexicon.id(w))
-            .collect();
         let share = |w: Option<WordId>| match w {
             Some(w) if w < FUNCTION_WORDS => config.function_word_share,
             _ => 1.0,
         };
+        // The line's own words, in any form ("neighbors" for "neighbour's"),
+        // charged once each, at the largest share among the line words they
+        // are forms of.
+        let mut novel: HashMap<WordId, f32> = HashMap::new();
+        for word in &reading.words {
+            let charge = config.novelty * share(self.lexicon.id(word));
+            for &w in self.lexicon.same_word(&self.dict, word) {
+                let entry = novel.entry(w).or_default();
+                *entry = entry.max(charge);
+            }
+        }
+        let originals: HashSet<WordId> = novel.keys().copied().collect();
         let mut extra: HashMap<WordId, f32> = search.extra.clone();
-        for &w in &originals {
-            *extra.entry(w).or_default() += config.novelty * share(Some(w));
+        for (w, charge) in novel {
+            *extra.entry(w).or_default() += charge;
         }
         // Words sharing a stem with the line's, charged once each, at the
         // largest share among the line words they relate to.
         let mut root: HashMap<WordId, f32> = HashMap::new();
         for word in &reading.words {
             let charge = config.root * share(self.lexicon.id(word));
-            for &w in self.lexicon.same_stem(word) {
+            for &w in self.lexicon.same_stem(&self.dict, word) {
                 let entry = root.entry(w).or_default();
                 *entry = entry.max(charge);
             }
@@ -603,6 +628,68 @@ mod tests {
         assert_eq!(rooted[0].text, "flea inn");
     }
 
+    /// An American lexicon (no "neighbour's") that knows British spellings.
+    fn neighbour_music() -> Engine {
+        let dict = CmuDictionary::from_bytes(
+            b"NEIGHBOR  N EY1 B ER0\nNEIGHBORS  N EY1 B ER0 Z\nNEIGHBOUR'S  N EY1 B ER0 Z\n\
+              MUSIC  M Y UW1 Z IH0 K\nMUSIC'S  M Y UW1 Z IH0 K S\nMUSICAL  M Y UW1 Z IH0 K AH0 L\n\
+              NAY  N EY1\nBURS  B ER1 Z\n",
+        )
+        .unwrap();
+        let frequencies: Vec<Frequency> = [
+            ("music", 5.0),
+            ("musical", 4.6),
+            ("neighbor", 4.5),
+            ("neighbors", 4.4),
+            ("neighbour's", 3.9),
+            ("music's", 3.5),
+            ("nay", 3.0),
+            ("burs", 2.0),
+        ]
+        .iter()
+        .map(|&(word, zipf)| Frequency {
+            word: word.into(),
+            zipf,
+        })
+        .collect();
+        let american = CommonWords::parse("music\nmusical\nneighbor\nneighbors\nnay\nburs\n");
+        let mut engine = Engine::new(dict, &frequencies, 100, true, Some(&american));
+        engine.set_spelling_variants(
+            SpellingVariants::parse("neighbour's\tneighbor's\nneighbours\tneighbors\n").unwrap(),
+        );
+        engine
+    }
+
+    #[test]
+    fn novelty_charges_every_form_of_the_line_s_words() {
+        let engine = neighbour_music();
+        assert_eq!(engine.lexicon.id("neighbour's"), None);
+        let hear = |text: &str, novelty: f32| {
+            let mut config = config(0.0, 0.0);
+            config.novelty = novelty;
+            engine
+                .mishear(text, &Deformation::new(""), &config)
+                .unwrap()
+                .heard
+        };
+        let plain = hear("neighbour's music", 0.0);
+        let novel = hear("neighbour's music", 1.5);
+        let diff = |t: &str| cost_of(&novel, t) - cost_of(&plain, t);
+        // "neighbors" and "music's" are the line's own words, respelled and
+        // inflected.
+        assert!((diff("neighbors music") - 3.0).abs() < 1e-5);
+        assert!((diff("nay burs music's") - 1.5).abs() < 1e-5);
+        let shared = |t: &str| plain.iter().find(|h| h.text == t).unwrap().shared;
+        assert_eq!(shared("neighbors music"), 2);
+        assert_eq!(shared("nay burs music's"), 1);
+        // A typographic apostrophe reads the same.
+        let curly = hear("neighbour’s music", 1.5);
+        assert_eq!(
+            cost_of(&curly, "neighbors music"),
+            cost_of(&novel, "neighbors music")
+        );
+    }
+
     /// The definition [`Engine::hear_varied`] implements, one full search
     /// per hearing: the best hearing given the penalties of those before.
     fn varied_by_research(
@@ -637,11 +724,13 @@ mod tests {
                 } else {
                     1.0
                 };
-                for &h in engine.lexicon.homophones(w) {
-                    let e = penalty.entry(h).or_default();
-                    *e = e.max(variety.variety * share);
+                for &f in engine.lexicon.same_word_of(w) {
+                    for &h in engine.lexicon.homophones(f) {
+                        let e = penalty.entry(h).or_default();
+                        *e = e.max(variety.variety * share);
+                    }
                 }
-                for &s in engine.lexicon.same_stem(engine.lexicon.word(w)) {
+                for &s in engine.lexicon.same_stem_of(w) {
                     for &h in engine.lexicon.homophones(s) {
                         let e = stems.entry(h).or_default();
                         *e = e.max(variety.root * share);

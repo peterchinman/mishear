@@ -60,6 +60,12 @@ ENABLE lists every inflected form, so "heard", "women" and "became" are in.
 It lacks days and months ("june", "monday") and recent words ("email",
 "website", "online"). `--all-words` turns the filter off.
 
+VarCon's spelling variants ([`data/VarCon`](../../data/VarCon), from SCOWL,
+permissive license, committed) map British, Canadian and Australian
+spellings to American ones, so "neighbors" counts as the line's own
+"neighbour's" (see "Same word"). `scripts/varcon_map.py` regenerates them;
+`--spelling-variants` reads another file.
+
 ## Commands
 
 ```sh
@@ -151,7 +157,8 @@ of the input. Its cost adds up three things:
     the one before than on its own (a saving when they go together).
     `--unigram` (fit 0) leaves it out.
 - **Extra costs.** The mishearing engine charges 0.9 for each word the
-  original line contains, and a fifth of that for function words; 0.2 for
+  original line contains, in any form (see "Same word"), and a fifth of
+  that for function words; 0.2 for
   each word sharing a stem with the line's (`--root`); 0.2 for each of the
   line's word boundaries a hearing keeps (`--crossing`). And each hearing
   after the first pays 1.0 for each word an earlier one used (`--variety`;
@@ -344,18 +351,40 @@ keeps one spelling per sound: the cheapest, after novelty. So with novelty
 on, "hark the harold angels sing" can come out as "…angels singh". Use
 `--all-spellings` to see every spelling.
 
+### Same word
+
+`--novelty` charges a hearing for giving the line's words back, and a word
+given back in another form is still the line's word: its possessives and
+plurals, in any spelling. "neighbors", "neighbor's" and "neighbours'" all
+count as the line's "neighbour's"; "music's" as its "music". Each heard word
+is charged once, at the largest share among the line's words it is a form
+of. A form is found by peeling layers and respelling:
+
+- A possessive or plural layer ('s, s', -s, -es, -ves) comes off only when
+  the word sounds like its base with that suffix: "music's" is "music" + S,
+  but "does" isn't "doe" + Z. The 's of a contraction stays ("it's",
+  "that's", "let's"), and "news" isn't "new".
+- British, Canadian and Australian spellings become American (VarCon).
+- Homophones stay different words ("there" for "their" is a hearing).
+
+`shared` counts these forms; `--variety` treats an earlier hearing's words
+the same way.
+
 ### Roots and boundaries
 
 - **`--root F` charges F for each heard word that shares a stem with a word
-  of the line.** Stems come from Snowball's English stemmer (Porter2):
-  "fly", "flies" and "flying" all give "fli". The same word counts too, so
-  `--root` adds to `--novelty` for it. `--function-share` applies when the
-  line's word is a function word. Irregular forms ("flew") aren't caught.
+  of the line.** Stems come from Snowball's English stemmer (Porter2), run
+  on the American spelling of the word's form (see "Same word"): "fly",
+  "flies" and "flying" all give "fli", and "neighbourly" shares "neighbor"'s.
+  The same word counts too, so `--root` adds to `--novelty` for it.
+  `--function-share` applies when the line's word is a function word.
+  Irregular forms ("flew") aren't caught.
   - In "the swallows fly in", the plain top hearings (`--variety 0`) all
     end in "flying" at 0 ("thus willows flying"). From `--root 1` they end
     in "frying".
-  - In "Since Persia fell at Marathon", "marathons" gets past `--novelty`,
-    which only catches the identical word. `--root` catches it.
+  - `--novelty` already charges "marathons" for "Marathon" (the same
+    word); `--root` adds "musical" for "music", which shares the stem but
+    isn't the same word.
 - **`--crossing F` rewards each of the line's word boundaries that a
   hearing cuts across** ("this guy" for "the sky" cuts "the|sky"). A
   negative cost would break the search's pruning, so it's charged instead
@@ -376,7 +405,8 @@ The plain top N tend to be one hearing respelled: "sin spurs affair at
 marathons", "seen spurs affair at marathons", "sense persevere at
 marathons", … `--variety F` (default 1.0) treats the hearings above each
 one as novelty treats the line: each word an earlier hearing used costs F
-more, as does any homophone of it ("cents" after "sense"). Function words
+more, in any form ("arrive" after "arrives"), as does any homophone of it
+("cents" after "sense"). Function words
 pay `--function-share` of that, and with `--root`, words sharing their
 stems (and those words' homophones) pay too. Each hearing is then the best one given those above it:
 

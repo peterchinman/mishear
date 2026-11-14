@@ -10,7 +10,7 @@ use crate::bigrams::BigramTable;
 use crate::cost::{CostConfig, CostModel};
 use crate::deform::VowelChart;
 use crate::engine::{Engine, MishearConfig, Variety};
-use crate::lexicon::{BIGRAM_PRIOR, CommonWords, Frequency, parse_frequencies};
+use crate::lexicon::{BIGRAM_PRIOR, CommonWords, Frequency, SpellingVariants, parse_frequencies};
 use crate::phone::Ph;
 use crate::search::SearchConfig;
 use crate::spec::{self, StepSpec};
@@ -301,6 +301,17 @@ impl MishearApp {
             app.set_bigrams(&bytes)?;
         }
         Ok(app)
+    }
+
+    /// Reads British, Canadian and Australian spellings and their American
+    /// ones (`variant<TAB>american` lines, VarCon's
+    /// `varcon-to-american.tsv`), so "neighbors" counts as the line's own
+    /// "neighbour's".
+    #[wasm_bindgen(js_name = setSpellingVariants)]
+    pub fn set_spelling_variants(&mut self, text: &str) -> Result<(), JsError> {
+        let variants = SpellingVariants::parse(text).map_err(|e| JsError::new(&e))?;
+        self.engine.set_spelling_variants(variants);
+        Ok(())
     }
 
     /// Adds word-pair counts (a `BigramTable` file, packed or text),

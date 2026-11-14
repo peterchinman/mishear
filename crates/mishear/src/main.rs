@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use mishear::accents;
 use mishear::knobs;
-use mishear::lexicon::CommonWords;
+use mishear::lexicon::{CommonWords, SpellingVariants};
 use mishear::phone::spell;
 use mishear::spec::{self, StepSpec};
 use mishear::{
@@ -34,7 +34,8 @@ USAGE: cargo run --release -p mishear -- COMMAND [OPTIONS]
 SEARCH OPTIONS
   -n N               how many results (default 4)
   --within X         every match costing at most X (otherwise the exact top N)
-  --novelty F        mishear/hear/examples: cost per word shared with the line
+  --novelty F        mishear/hear/examples: cost per word shared with the line,
+                     in any form ('music's', 'neighbors' for 'neighbour')
                      (default 0.9; function words a fifth of that)
   --commonness F     cost per nat of a word's rarity, −ln P(word): how much
                      common words are preferred (default 0.005; 0 ignores
@@ -59,9 +60,10 @@ SEARCH OPTIONS
   --root F           mishear/examples: cost per heard word sharing a stem
                      with a word of the line ('flying' for 'fly in'; the
                      same word included, on top of --novelty) (default 0.2)
-  --variety F        mishear/examples: cost per word an earlier hearing used
-                     (or a homophone of one), so each hearing differs from
-                     those above it; 0 lists the plain top N (default 1.0)
+  --variety F        mishear/examples: cost per word an earlier hearing used,
+                     in any form (or a homophone of one), so each hearing
+                     differs from those above it; 0 lists the plain top N
+                     (default 1.0)
   --crossing F       mishear/examples: reward per word boundary of the line
                      a hearing cuts across ('this guy' cuts 'the|sky'),
                      charged as a cost on each boundary kept (default 0.2)
@@ -87,6 +89,10 @@ SEARCH OPTIONS
   --all-words        keep names and brands (by default the lexicon keeps only
                      words in the ENABLE word list, data/ENABLE, and
                      contractions and possessives of them)
+  --spelling-variants PATH
+                     British, Canadian and Australian spellings and their
+                     American ones, so 'neighbors' counts as the line's own
+                     'neighbour's' (default data/VarCon/varcon-to-american.tsv)
 
 DEFORMATION OPTIONS (combine freely; applied in order)
   --accent NAME      a preset (see `list`)
@@ -138,6 +144,7 @@ struct Options {
     /// The word-pair counts were asked for, so their absence is an error.
     bigrams_required: bool,
     bigram_file: Option<PathBuf>,
+    spelling_variants: Option<PathBuf>,
     beam: usize,
     public_only: bool,
     word_penalty: f32,
@@ -184,6 +191,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         unigram: false,
         bigrams_required: false,
         bigram_file: None,
+        spelling_variants: None,
         beam: d.search.beam,
         public_only: false,
         word_penalty: d.search.word_penalty,
@@ -284,6 +292,9 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                     .parse()
                     .map_err(|e| format!("--beam: {e}"))?
             }
+            "--spelling-variants" => {
+                o.spelling_variants = Some(PathBuf::from(value("--spelling-variants")?));
+            }
             "--bigram-file" => {
                 o.bigram_file = Some(PathBuf::from(value("--bigram-file")?));
                 o.bigrams_required = true;
@@ -325,6 +336,9 @@ fn crate_path(relative: &str) -> PathBuf {
 /// The word list that keeps names and brands out of the lexicon.
 const WORD_LIST: &str = "../../data/ENABLE/enable1.txt";
 
+/// Spelling variants and their American spellings.
+const SPELLING_VARIANTS: &str = "../../data/VarCon/varcon-to-american.tsv";
+
 fn engine(o: &Options) -> Result<Engine, String> {
     engine_with(o, o.vocab, o.all_pronunciations)
 }
@@ -349,6 +363,11 @@ fn engine_with(o: &Options, vocab: usize, all_pronunciations: bool) -> Result<En
         all_pronunciations,
         common.as_ref(),
     )?;
+    let variants = o
+        .spelling_variants
+        .clone()
+        .unwrap_or_else(|| crate_path(SPELLING_VARIANTS));
+    engine.set_spelling_variants(SpellingVariants::read(&variants)?);
     // Some grid point may score fit, even if the defaults don't.
     let wants_fit = !o.unigram
         && (o.fit > 0.0
