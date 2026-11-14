@@ -10,7 +10,9 @@ use crate::bigrams::BigramTable;
 use crate::cost::{CostConfig, CostModel};
 use crate::deform::VowelChart;
 use crate::engine::{Engine, MishearConfig, Variety};
-use crate::lexicon::{BIGRAM_PRIOR, CommonWords, Frequency, SpellingVariants, parse_frequencies};
+use crate::lexicon::{
+    BIGRAM_PRIOR, CommonWords, DEFAULT_SCOWL_LEVEL, Frequency, SpellingVariants, parse_frequencies,
+};
 use crate::phone::Ph;
 use crate::search::SearchConfig;
 use crate::spec::{self, StepSpec};
@@ -25,11 +27,27 @@ pub struct LexiconOptions {
     pub vocabulary: usize,
     /// Every CMUdict pronunciation, or only the first.
     pub all_pronunciations: bool,
-    /// Keep only words the system word list has in lowercase (when it was
-    /// supplied).
-    pub common_words: bool,
+    /// Which words the lexicon may hold.
+    pub word_list: WordListDto,
+    /// With the SCOWL list, its size level kept (10 to 80).
+    pub scowl_level: u8,
     /// Bigram smoothing μ.
     pub bigram_prior: f32,
+}
+
+/// Which words the lexicon may hold, besides contractions and possessives
+/// of them.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all = "snake_case")]
+pub enum WordListDto {
+    /// ENABLE: no names, brands or abbreviations; Scrabble words.
+    Enable,
+    /// SCOWL up to `scowl_level`: names, places, days and months; no
+    /// abbreviations, single letters or spelled-out letters.
+    Scowl,
+    /// Every word, but single letters and spelled-out letters.
+    None,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tsify)]
@@ -210,7 +228,8 @@ pub struct LexiconInfoDto {
     pub bigrams: bool,
     /// Word pairs in the loaded counts.
     pub bigram_pairs: usize,
-    pub common_words_available: bool,
+    pub enable_available: bool,
+    pub scowl_available: bool,
 }
 
 impl From<CostDto> for CostConfig {
@@ -261,7 +280,9 @@ fn spelled(phonemes: &[Ph]) -> Vec<String> {
 pub struct MishearApp {
     engine: Engine,
     frequencies: Vec<Frequency>,
-    common: Option<CommonWords>,
+    enable: Option<CommonWords>,
+    scowl: Option<CommonWords>,
+    any: CommonWords,
     lexicon: LexiconOptions,
     cost: Option<CostDto>,
 }
@@ -270,33 +291,34 @@ pub struct MishearApp {
 impl MishearApp {
     /// Builds the engine from CMUdict's bytes, the word-frequency list, and
     /// optionally the word-pair counts (or later, with `loadBigrams`) and
-    /// the word list that filters the lexicon.
+    /// the word lists that filter the lexicon: ENABLE's words, and SCOWL's
+    /// `word<TAB>level` lines.
     #[wasm_bindgen(constructor)]
     pub fn new(
         cmudict: &[u8],
         frequencies: &str,
         bigrams: Option<Vec<u8>>,
-        common_words: Option<String>,
+        enable_words: Option<String>,
+        scowl_levels: Option<String>,
         lexicon: LexiconOptions,
     ) -> Result<MishearApp, JsError> {
         let dict = mime_reader::CmuDictionary::from_bytes(cmudict)?;
         let frequencies = parse_frequencies(frequencies).map_err(|e| JsError::new(&e))?;
-        let common = common_words.map(|text| CommonWords::parse(&text));
-        let filter = common.as_ref().filter(|_| lexicon.common_words);
-        let engine = Engine::new(
-            dict,
-            &frequencies,
-            lexicon.vocabulary,
-            lexicon.all_pronunciations,
-            filter,
-        );
+        let enable = enable_words.map(|text| CommonWords::parse(&text));
+        let scowl = scowl_levels
+            .map(|text| CommonWords::parse_levels(&text))
+            .transpose()
+            .map_err(|e| JsError::new(&e))?;
         let mut app = Self {
-            engine,
+            engine: Engine::new(dict, &frequencies, 0, false, None),
             frequencies,
-            common,
+            enable,
+            scowl,
+            any: CommonWords::any(),
             lexicon,
             cost: None,
         };
+        app.rebuild();
         if let Some(bytes) = bigrams {
             app.set_bigrams(&bytes)?;
         }
@@ -333,16 +355,12 @@ impl MishearApp {
         }
         let rebuild = lexicon.vocabulary != self.lexicon.vocabulary
             || lexicon.all_pronunciations != self.lexicon.all_pronunciations
-            || lexicon.common_words != self.lexicon.common_words;
+            || lexicon.word_list != self.lexicon.word_list
+            || (lexicon.word_list == WordListDto::Scowl
+                && lexicon.scowl_level != self.lexicon.scowl_level);
         self.lexicon = lexicon;
         if rebuild {
-            let filter = self.common.as_ref().filter(|_| lexicon.common_words);
-            self.engine.rebuild_lexicon(
-                &self.frequencies,
-                lexicon.vocabulary,
-                lexicon.all_pronunciations,
-                filter,
-            );
+            self.rebuild();
         }
         // The table stays; only the smoothing may have changed.
         if let Some((table, _)) = self.engine.lexicon.bigram_table() {
@@ -364,8 +382,28 @@ impl MishearApp {
                 .lexicon
                 .bigram_table()
                 .map_or(0, |(table, _)| table.len()),
-            common_words_available: self.common.is_some(),
+            enable_available: self.enable.is_some(),
+            scowl_available: self.scowl.is_some(),
         }
+    }
+
+    /// Rebuilds the lexicon from the current options. A word list that
+    /// wasn't supplied keeps every word.
+    fn rebuild(&mut self) {
+        if let Some(scowl) = &mut self.scowl {
+            scowl.set_max_level(self.lexicon.scowl_level);
+        }
+        let filter = match self.lexicon.word_list {
+            WordListDto::Enable => self.enable.as_ref(),
+            WordListDto::Scowl => self.scowl.as_ref(),
+            WordListDto::None => Some(&self.any),
+        };
+        self.engine.rebuild_lexicon(
+            &self.frequencies,
+            self.lexicon.vocabulary,
+            self.lexicon.all_pronunciations,
+            filter,
+        );
     }
 
     /// Runs one request: deform and hear text, or hear phonemes.
@@ -556,7 +594,8 @@ pub fn defaults() -> DefaultsDto {
         lexicon: LexiconOptions {
             vocabulary: 50_000,
             all_pronunciations: true,
-            common_words: true,
+            word_list: WordListDto::Enable,
+            scowl_level: DEFAULT_SCOWL_LEVEL,
             bigram_prior: BIGRAM_PRIOR,
         },
         search: SearchDto {

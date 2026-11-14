@@ -15,7 +15,8 @@ use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::deform::Deformation;
 use crate::lexicon::{
-    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, read_frequencies, spelling,
+    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, read_frequencies,
+    spelled_as_letters, spelling,
 };
 use crate::phone::Ph;
 use crate::search::{
@@ -125,6 +126,17 @@ pub struct Mishearing {
     pub stats: SearchStats,
 }
 
+/// Whether the lexicon keeps `word`: every word when `common` is `None`.
+fn keeps<D: PronouncingDictionary + ?Sized>(
+    dict: &D,
+    common: Option<&CommonWords>,
+    word: &str,
+) -> bool {
+    common.is_none_or(|c| {
+        c.contains(word) && !(c.rejects_letter_spellings() && spelled_as_letters(dict, word))
+    })
+}
+
 /// A dictionary, a lexicon and a cost model, loaded once.
 pub struct Engine {
     dict: ConfiguredDictionary<CmuDictionary>,
@@ -165,7 +177,7 @@ impl Engine {
         common: Option<&CommonWords>,
     ) -> Self {
         let lexicon = Lexicon::build(&dict, frequencies, vocabulary, all_pronunciations, |w| {
-            common.is_none_or(|c| c.contains(w))
+            keeps(&dict, common, w)
         });
         Self::with_lexicon(dict, lexicon)
     }
@@ -194,7 +206,7 @@ impl Engine {
             frequencies,
             vocabulary,
             all_pronunciations,
-            |w| common.is_none_or(|c| c.contains(w)),
+            |w| keeps(&self.dict, common, w),
         );
         self.lexicon.set_spelling_variants(&self.dict, variants);
         if let Some((table, prior)) = bigrams {

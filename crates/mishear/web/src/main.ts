@@ -38,7 +38,15 @@ interface BoolKnob {
   hint: string;
   heavy?: boolean;
 }
-type Knob = NumberKnob | BoolKnob;
+interface ChoiceKnob {
+  type: 'choice';
+  key: string;
+  label: string;
+  hint: string;
+  options: { value: string; label: string }[];
+  heavy?: boolean;
+}
+type Knob = NumberKnob | BoolKnob | ChoiceKnob;
 type Group = 'search' | 'cost' | 'lexicon' | 'deformation';
 
 const SEARCH_KNOBS: Knob[] = [
@@ -175,10 +183,25 @@ const LEXICON_KNOBS: Knob[] = [
   { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'The most frequent words kept. Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
   { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Every CMUdict pronunciation of a word, or only the first.', heavy: true },
   {
-    type: 'bool',
-    key: 'common_words',
-    label: 'ENABLE words only',
-    hint: 'Keep only words in the ENABLE word list (no names, brands or abbreviations; every inflected form listed), plus contractions and possessives of them: “it’s”, “don’t”, “people’s”. The same list rhyme-golf uses.',
+    type: 'choice',
+    key: 'word_list',
+    label: 'word list',
+    hint: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, and words said as their letters (“TV”, “UK”).',
+    options: [
+      { value: 'enable', label: 'ENABLE' },
+      { value: 'scowl', label: 'SCOWL' },
+      { value: 'none', label: 'every word' },
+    ],
+    heavy: true,
+  },
+  {
+    type: 'number',
+    key: 'scowl_level',
+    label: 'SCOWL level',
+    hint: 'With the SCOWL list: how rare a word may be. 35: common words; 50: a small dictionary’s; 60: a large one’s; 70–80: rare and obscure words (“haar”, “qi”).',
+    min: 10,
+    max: 80,
+    step: 5,
     heavy: true,
   },
   {
@@ -358,6 +381,12 @@ function upgrade(saved: Partial<State> | null): Partial<State> | null {
     const sweepKnob = saved.sweepKnob === 'search.lm_weight' ? 'search.fit' : saved.sweepKnob;
     saved = { ...saved, v: 4, search: search as unknown as SearchDto, sweepKnob };
   }
+  if (saved.v === 4) {
+    // Format 4 had an "ENABLE words only" switch; off kept every word.
+    const { common_words, ...lexicon } = (saved.lexicon ?? {}) as Record<string, unknown>;
+    if (common_words === false) lexicon.word_list = 'none';
+    saved = { ...saved, v: 5, lexicon: lexicon as unknown as LexiconOptions };
+  }
   return saved;
 }
 
@@ -397,7 +426,7 @@ function savedState(): Partial<State> {
   );
   return {
     ...top,
-    v: 4,
+    v: 5,
     deformation: changed(state.deformation, base.deformation) as State['deformation'],
     search: changed(state.search, base.search) as unknown as SearchDto,
     cost: changed(state.cost, base.cost) as unknown as CostDto,
@@ -516,6 +545,27 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
     onChange();
   };
 
+  if (knob.type === 'choice') {
+    const select = el('select', {});
+    for (const option of knob.options) {
+      select.append(el('option', { value: option.value, textContent: option.label, selected: values[knob.key] === option.value }));
+    }
+    select.addEventListener('change', () => {
+      values[knob.key] = select.value;
+      commit();
+    });
+    reset.addEventListener('click', () => {
+      values[knob.key] = def;
+      select.value = String(def);
+      commit();
+    });
+    head.append(el('label', { className: 'name' }, `${knob.label} `, select), reset);
+    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }));
+    wrap.dataset.key = knob.key;
+    markChanged();
+    return wrap;
+  }
+
   if (knob.type === 'bool') {
     const box = el('input', { type: 'checkbox', checked: Boolean(values[knob.key]) });
     box.addEventListener('change', () => {
@@ -601,11 +651,13 @@ function renderKnobs(group: Exclude<Group, 'deformation'>, knobs: Knob[], contai
       }),
     ),
   );
-  if (group === 'lexicon' && lexiconInfo && !lexiconInfo.common_words_available) {
-    const box = container.querySelector<HTMLInputElement>('[data-key="common_words"] input');
-    if (box) {
-      box.disabled = true;
-      box.title = 'The ENABLE word list wasn’t found (see `npm run data`).';
+  if (group === 'lexicon' && lexiconInfo) {
+    const missing: Record<string, boolean> = { enable: !lexiconInfo.enable_available, scowl: !lexiconInfo.scowl_available };
+    for (const option of container.querySelectorAll<HTMLOptionElement>('[data-key="word_list"] option')) {
+      if (missing[option.value]) {
+        option.disabled = true;
+        option.title = 'Its word list wasn’t found (see `npm run data`).';
+      }
     }
   }
 }
@@ -1145,7 +1197,7 @@ function renderLexiconInfo(): void {
   const i = lexiconInfo;
   $('lexicon-info').textContent =
     `${thousands(i.words)} words, ${thousands(i.trie_nodes)} trie nodes; ${i.bigrams ? `${thousands(i.bigram_pairs)} word pairs loaded` : 'word-pair counts not loaded'}; ` +
-    `ENABLE word list ${i.common_words_available ? 'loaded' : 'not found'}` +
+    `ENABLE ${i.enable_available ? 'loaded' : 'not found'}, SCOWL ${i.scowl_available ? 'loaded' : 'not found'}` +
     (engineMemoryMb ? `; engine memory ${Math.round(engineMemoryMb)} MB.` : '.');
 }
 

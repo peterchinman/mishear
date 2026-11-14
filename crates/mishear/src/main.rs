@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use mishear::accents;
 use mishear::knobs;
-use mishear::lexicon::{CommonWords, SpellingVariants};
+use mishear::lexicon::{CommonWords, DEFAULT_SCOWL_LEVEL, SpellingVariants};
 use mishear::phone::spell;
 use mishear::spec::{self, StepSpec};
 use mishear::{
@@ -87,9 +87,19 @@ SEARCH OPTIONS
   --beam N           with bigrams, partial hearings kept per position: wider
                      is closer to exact, and slower (default 100)
   --bigram-file PATH other word-pair counts (implies --bigrams)
-  --all-words        keep names and brands (by default the lexicon keeps only
-                     words in the ENABLE word list, data/ENABLE, and
-                     contractions and possessives of them)
+  --word-list enable|scowl|none
+                     which words the lexicon may hold, besides contractions
+                     and possessives of them (default enable):
+                     enable: the ENABLE word list, data/ENABLE (no names,
+                       brands or abbreviations; Scrabble words such as 'qi');
+                     scowl: SCOWL's words up to --scowl-level, data/SCOWL
+                       (names, places, days and months; no abbreviations);
+                     none: every word.
+                     scowl and none drop single letters but 'a' and 'i', and
+                     words pronounced as their letters ('tv', 'uk')
+  --scowl-level N    with --word-list scowl, SCOWL's size level kept: 10 the
+                     most common words ... 80 rare ones (default 60)
+  --all-words        --word-list none
   --spelling-variants PATH
                      British, Canadian and Australian spellings and their
                      American ones, so 'neighbors' counts as the line's own
@@ -139,7 +149,8 @@ struct Options {
     deformation: Deformation,
     lines: usize,
     line_seed: u64,
-    all_words: bool,
+    word_list: WordList,
+    scowl_level: u8,
     /// Fit 0, whatever else is given.
     unigram: bool,
     /// The word-pair counts were asked for, so their absence is an error.
@@ -188,7 +199,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         deformation: Deformation::new(""),
         lines: 6,
         line_seed: 1,
-        all_words: false,
+        word_list: WordList::Enable,
+        scowl_level: DEFAULT_SCOWL_LEVEL,
         unigram: false,
         bigrams_required: false,
         bigram_file: None,
@@ -285,7 +297,20 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--knob" => steps.push(StepSpec::Knob(value("--knob")?)),
             "--vowels" => steps.push(StepSpec::Vowels(value("--vowels")?)),
             "--intensity" => intensity = number(value("--intensity")?)?,
-            "--all-words" => o.all_words = true,
+            "--all-words" => o.word_list = WordList::None,
+            "--word-list" => {
+                o.word_list = match value("--word-list")?.as_str() {
+                    "enable" => WordList::Enable,
+                    "scowl" => WordList::Scowl,
+                    "none" => WordList::None,
+                    other => return Err(format!("--word-list: unknown list {other:?}")),
+                }
+            }
+            "--scowl-level" => {
+                o.scowl_level = value("--scowl-level")?
+                    .parse()
+                    .map_err(|e| format!("--scowl-level: {e}"))?
+            }
             "--bigrams" => o.bigrams_required = true,
             "--unigram" => o.unigram = true,
             "--beam" => {
@@ -337,6 +362,17 @@ fn crate_path(relative: &str) -> PathBuf {
 /// The word list that keeps names and brands out of the lexicon.
 const WORD_LIST: &str = "../../data/ENABLE/enable1.txt";
 
+/// SCOWL's words and their size levels.
+const SCOWL_LEVELS: &str = "../../data/SCOWL/scowl-levels.tsv";
+
+/// Which words the lexicon may hold.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WordList {
+    Enable,
+    Scowl,
+    None,
+}
+
 /// Spelling variants and their American spellings.
 const SPELLING_VARIANTS: &str = "../../data/VarCon/varcon-to-american.tsv";
 
@@ -352,11 +388,14 @@ fn engine_with(o: &Options, vocab: usize, all_pronunciations: bool) -> Result<En
             frequencies.display()
         ));
     }
-    let common = if o.all_words {
-        None
-    } else {
-        Some(CommonWords::read(&crate_path(WORD_LIST))?)
+    let common = match o.word_list {
+        WordList::Enable => CommonWords::read(&crate_path(WORD_LIST))?,
+        WordList::Scowl => {
+            CommonWords::read_levels(&crate_path(SCOWL_LEVELS))?.with_max_level(o.scowl_level)
+        }
+        WordList::None => CommonWords::any(),
     };
+    let common = Some(common);
     let mut engine = Engine::load(
         &crate_path("../../data/CMUdict/cmudict-0.7b"),
         &frequencies,

@@ -1,8 +1,9 @@
 // Links the engine's data into public/data so the dev server and the build
-// serve it: CMUdict, the ENABLE word list and VarCon's spelling variants
-// (committed), and the generated word-frequency list and word-pair counts
-// (crates/mishear/data, gitignored). The packed counts are gzipped for the
-// page, which unzips them as they arrive. Missing optional files are skipped.
+// serve it: CMUdict, the ENABLE and SCOWL word lists and VarCon's spelling
+// variants (committed), and the generated word-frequency list and word-pair
+// counts (crates/mishear/data, gitignored). The packed counts are gzipped for
+// the page, which unzips them as they arrive. Missing optional files are
+// skipped.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -27,6 +28,9 @@ const files = [
   ['bigrams-en.tsv', '../../data/bigrams-en.tsv', false],
   ['bigrams-en.bin.gz', '../../data/bigrams-en.bin', false],
   ['enable1.txt', '../../../../data/ENABLE/enable1.txt', true],
+  ['scowl-levels.tsv', '../../../../data/SCOWL/scowl-levels.tsv', true],
+  // SCOWL's notices travel with it.
+  ['scowl-Copyright.txt', '../../../../data/SCOWL/Copyright', true],
   ['varcon-to-american.tsv', '../../../../data/VarCon/varcon-to-american.tsv', true],
   // VarCon's notices travel with it.
   ['varcon-LICENSE.txt', '../../../../data/VarCon/LICENSE', true],
