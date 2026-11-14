@@ -41,8 +41,9 @@ SEARCH OPTIONS
                      common words are preferred (default 0.005; 0 ignores
                      frequency)
   --fit F            cost per nat of a word's misfit after the one before,
-                     ln(P(word) / P(word | previous)), a saving when they go
-                     together: how much hearings' word pairs must make sense
+                     ln(Q(word) / P(word | previous)), both from the word-pair
+                     counts, a saving when they go together: how much
+                     hearings' word pairs must make sense
                      (default 0.005; 0 scores words alone, exactly). A word's
                      penalty + commonness + fit is floored at zero.
   --lm F             sets --commonness and --fit both (the single weight

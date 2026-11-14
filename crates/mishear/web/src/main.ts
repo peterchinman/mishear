@@ -66,7 +66,7 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'fit',
     label: 'fit',
-    hint: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), from Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
+    hint: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
     min: 0,
     max: 0.5,
     step: 0.005,

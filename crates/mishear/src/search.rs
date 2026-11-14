@@ -6,9 +6,9 @@
 //! - the phonetic edit cost of the word's pronunciation against its span
 //!   ([`CostModel`]);
 //! - [`word_cost`]: `word_penalty`, plus `commonness × −ln P(word)` (common
-//!   words are cheap), plus, with bigrams, `fit × ln(P(word) / P(word |
-//!   previous word))` (words that go with the one before are cheap), floored
-//!   at zero;
+//!   words are cheap), plus, with bigrams, `fit × ln(Q(word) / P(word |
+//!   previous word))` (words that go with the one before are cheap; `Q` is
+//!   the word-pair counts' own word frequency), floored at zero;
 //! - any extra cost the caller puts on particular words;
 //! - any cost the caller puts on a word boundary at particular positions.
 //!
@@ -52,7 +52,8 @@ pub struct SearchConfig {
     /// are preferred.
     pub commonness: f32,
     /// Cost per nat of a word's misfit after the previous word,
-    /// `ln(P(word) / P(word | previous))`: negative (a saving) when the
+    /// `ln(Q(word) / P(word | previous))`, `Q` being the word-pair counts'
+    /// own word frequency ([`Lexicon::misfit`]): negative (a saving) when the
     /// word goes with the one before, positive when it doesn't. 0 scores
     /// words alone, and the search is exact; above 0 it uses the lexicon's
     /// word-pair counts, when it has them.
@@ -947,17 +948,19 @@ mod tests {
         let lexicon = tiny_with_pairs();
         let id = |w: &str| lexicon.id(w).unwrap();
         let (this, guy, the) = (id("this"), id("guy"), id("the"));
-        // Equal weights: the word's surprisal after the previous word, as
-        // the single weight scored it.
         let equal = SearchConfig {
             commonness: 0.05,
             fit: 0.05,
             ..SearchConfig::default()
         };
+        // Commonness from wordfreq, fit from the word-pair counts alone.
         for previous in [None, Some(this), Some(the)] {
-            let old = equal.word_penalty + 0.05 * lexicon.surprisal_after(previous, guy);
-            assert!((word_cost(&lexicon, &equal, previous, guy) - old).abs() < 1e-5);
+            let parts = equal.word_penalty
+                + 0.05 * lexicon.surprisal(guy)
+                + 0.05 * lexicon.misfit(previous, guy);
+            assert!((word_cost(&lexicon, &equal, previous, guy) - parts).abs() < 1e-5);
         }
+        assert_eq!(lexicon.misfit(None, guy), 0.0);
         // "guy" fits after "this", not after "the".
         assert!(lexicon.misfit(Some(this), guy) < 0.0 && lexicon.misfit(Some(the), guy) > 0.0);
         // Fit 0: words alone, whatever came before.
@@ -987,6 +990,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn fit_compares_a_pair_with_the_counts_own_frequencies() {
+        let lexicon = tiny_with_pairs();
+        let id = |w: &str| lexicon.id(w).unwrap();
+        // The counts' own frequencies: how often each word is followed by
+        // any word, over all of them.
+        let q_this = 500.0f32 / (1000.0 + 500.0 + 100.0 + 80.0);
+        let (case, this) = (id("case"), id("this"));
+        let misfit = lexicon.surprisal_after(Some(case), this) + q_this.ln();
+        assert!((lexicon.misfit(Some(case), this) - misfit).abs() < 1e-5);
+        // wordfreq's frequency of "this" doesn't enter fit.
+        assert_ne!(-q_this.ln(), lexicon.surprisal(this));
     }
 
     #[test]

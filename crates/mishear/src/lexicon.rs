@@ -170,11 +170,20 @@ pub fn same_word_key<D: PronouncingDictionary + ?Sized>(
 }
 
 /// The bigram model over this lexicon: a [`BigramTable`] seen through the
-/// lexicon's words, smoothed toward the unigram frequencies:
-/// `P(w | v) = (count(v, w) + (μ + r(v))·P(w)) / (count(v) + μ)`, so a pair
+/// lexicon's words, smoothed toward the table's own word frequencies:
+/// `P(w | v) = (count(v, w) + (μ + r(v))·Q(w)) / (count(v) + μ)`, so a pair
 /// seen often is likely, a rarely seen left word says little, and the mass
 /// of pairs left out of the table (`r(v)`: pruned, or with words outside
-/// the lexicon) is spread by `P(w)` rather than lost.
+/// the lexicon) is spread by `Q(w)` rather than lost.
+///
+/// `Q(w) = count(w) / Σ count` over the lexicon's words in the table, where
+/// `count(w)` is how often `w` is followed by any word: the table's own
+/// unigram, so a word's misfit, `ln(Q(w) / P(w | v))`, measures only how it
+/// goes with the word before. Measured against wordfreq's `P(w)` instead,
+/// misfit also carried the gap between the two corpora: fiction's "stood"
+/// was cheap after any word, and contractions, which the table splits
+/// apart, cost 12 nats after any word. Words the table lacks fall back to
+/// wordfreq's `P(w)`, so their misfit stays near zero.
 struct Bigrams {
     table: Arc<BigramTable>,
     /// The smoothing strength `μ`: how many words of evidence the unigram
@@ -186,8 +195,10 @@ struct Bigrams {
     totals: Vec<f32>,
     /// `μ + r(v)`: the prior's weight after `v`.
     backoff: Vec<f32>,
-    /// The cheapest `−ln P(w | ·)` over every context, the start included.
-    best: Vec<f32>,
+    /// `−ln Q(w)`.
+    base: Vec<f32>,
+    /// The least misfit over every context, the start (0) included.
+    best_misfit: Vec<f32>,
 }
 
 /// The default smoothing strength `μ`, chosen for the Google Books counts:
@@ -281,6 +292,21 @@ impl CommonWords {
                 || self.words.contains(part)
                 || (k > 0 && CLITICS.contains(&part))
         })
+    }
+}
+
+impl Bigrams {
+    /// `−ln P(w | v)`.
+    fn surprisal_after(&self, v: WordId, w: WordId) -> f32 {
+        let (tv, tw) = (self.in_table[v as usize], self.in_table[w as usize]);
+        let count = if tv == u32::MAX || tw == u32::MAX {
+            0.0
+        } else {
+            self.table.count(tv, tw).unwrap_or(0.0)
+        };
+        let p = (count + self.backoff[v as usize] * (-self.base[w as usize]).exp())
+            / (self.totals[v as usize] + self.prior);
+        -p.ln()
     }
 }
 
@@ -547,9 +573,21 @@ impl Lexicon {
                 .sum();
             backoff[v] = prior + (f64::from(totals[v]) - listed).max(0.0) as f32;
         }
-        // Unseen pairs get at most `P(w)`, since `r(v) ≤ count(v)`: the
-        // cheapest context is the unigram or a listed pair.
-        let mut best: Vec<f32> = self.surprisal.clone();
+        let total: f64 = totals.iter().map(|&t| f64::from(t)).sum();
+        let base: Vec<f32> = totals
+            .iter()
+            .zip(&self.surprisal)
+            .map(|(&count, &surprisal)| {
+                if count > 0.0 {
+                    -(f64::from(count) / total).ln() as f32
+                } else {
+                    surprisal
+                }
+            })
+            .collect();
+        // Unseen pairs get at most `Q(w)`, since `r(v) ≤ count(v)`, so a
+        // misfit of at least 0: the least is at the start or a listed pair.
+        let mut best_misfit = vec![0.0f32; n];
         for (v, &t) in in_table.iter().enumerate() {
             if t == u32::MAX {
                 continue;
@@ -560,9 +598,10 @@ impl Lexicon {
                 if w == u32::MAX {
                     continue;
                 }
-                let p = (dequantize(q) + backoff[v] * (-self.surprisal[w as usize]).exp())
-                    / (totals[v] + prior);
-                best[w as usize] = best[w as usize].min(-p.ln());
+                let p =
+                    (dequantize(q) + backoff[v] * (-base[w as usize]).exp()) / (totals[v] + prior);
+                let misfit = -p.ln() - base[w as usize];
+                best_misfit[w as usize] = best_misfit[w as usize].min(misfit);
             }
         }
         self.bigrams = Some(Bigrams {
@@ -571,7 +610,8 @@ impl Lexicon {
             in_table,
             totals,
             backoff,
-            best,
+            base,
+            best_misfit,
         });
     }
 
@@ -587,43 +627,30 @@ impl Lexicon {
     /// `−ln P(word | previous)`: the bigram model when loaded (and there is
     /// a previous word), else [`Self::surprisal`].
     pub fn surprisal_after(&self, previous: Option<WordId>, word: WordId) -> f32 {
-        let unigram = self.surprisal[word as usize];
         match (&self.bigrams, previous) {
-            (Some(b), Some(v)) => {
-                let (tv, tw) = (b.in_table[v as usize], b.in_table[word as usize]);
-                let count = if tv == u32::MAX || tw == u32::MAX {
-                    0.0
-                } else {
-                    b.table.count(tv, tw).unwrap_or(0.0)
-                };
-                let p = (count + b.backoff[v as usize] * (-unigram).exp())
-                    / (b.totals[v as usize] + b.prior);
-                -p.ln()
-            }
-            _ => unigram,
+            (Some(b), Some(v)) => b.surprisal_after(v, word),
+            _ => self.surprisal[word as usize],
         }
     }
 
-    /// How much less likely `word` is after `previous` than on its own,
-    /// in nats: `ln(P(word) / P(word | previous))`, negative when it goes
-    /// with the one before. 0 at the line's start, or without bigrams.
+    /// How much less likely `word` is after `previous` than the word-pair
+    /// counts make it on its own, in nats: `ln(Q(word) / P(word |
+    /// previous))`, with `Q` the counts' own word frequencies (not
+    /// wordfreq's), negative when it goes with the one before. 0 at the
+    /// line's start, or without bigrams.
     pub fn misfit(&self, previous: Option<WordId>, word: WordId) -> f32 {
-        self.surprisal_after(previous, word) - self.surprisal[word as usize]
+        match (&self.bigrams, previous) {
+            (Some(b), Some(v)) => b.surprisal_after(v, word) - b.base[word as usize],
+            _ => 0.0,
+        }
     }
 
     /// The least [`Self::misfit`] over every context (at most 0, the
-    /// line's start).
+    /// line's start): a lower bound the search prunes with.
     pub fn best_misfit(&self, word: WordId) -> f32 {
-        self.best_surprisal(word) - self.surprisal[word as usize]
-    }
-
-    /// The cheapest [`Self::surprisal_after`] over every context: a lower
-    /// bound the search prunes with.
-    pub fn best_surprisal(&self, word: WordId) -> f32 {
-        match &self.bigrams {
-            Some(b) => b.best[word as usize],
-            None => self.surprisal[word as usize],
-        }
+        self.bigrams
+            .as_ref()
+            .map_or(0.0, |b| b.best_misfit[word as usize])
     }
 
     pub fn node_count(&self) -> usize {

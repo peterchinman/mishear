@@ -152,9 +152,10 @@ of the input. Its cost adds up three things:
   (see "Commonness and fit" below):
   - **commonness**, `0.005 × −ln P(word)`, with `P` from wordfreq: how rare
     the word is;
-  - **fit**, `0.005 × ln(P(word) / P(word | previous word))`, from word-pair
-    counts in Google Books fiction: how much less likely the word is after
-    the one before than on its own (a saving when they go together).
+  - **fit**, `0.005 × ln(Q(word) / P(word | previous word))`, both from
+    word-pair counts in Google Books fiction: how much less likely the word
+    is after the one before than on its own (a saving when they go
+    together).
     `--unigram` (fit 0) leaves it out.
 - **Extra costs.** The mishearing engine charges 0.9 for each word the
   original line contains, in any form (see "Same word"), and a fifth of
@@ -275,14 +276,29 @@ ones a hearing can contain:
 
 ### Commonness and fit
 
-With word pairs, a word's surprisal after the one before splits in two:
-`−ln P(w | v) = −ln P(w) + ln(P(w) / P(w | v))`, how rare the word is plus
-how badly it fits. "guy" costs 8.29 nats alone; after "this", which makes
-it 16 times likelier, 5.50 (a fit of −2.79); after "thus", 11.19 (+2.90).
-One weight used to scale the sum, so asking for pairs that go together
-also pushed toward common words: at 0.3, hearings collapsed into
-"information" and "scientifically". `--commonness` and `--fit` weight the
-two apart; equal weights give the old costs exactly (a test checks this).
+A word costs two things besides its sound: how rare it is, and how badly
+it fits after the word before.
+
+- **Commonness**, `−ln P(w)`, with `P` from wordfreq.
+- **Fit**, `ln(Q(w) / P(w | v))`, both from the Google Books word pairs:
+  `P(w | v)` is how likely `w` is after `v`, and `Q(w)` how often the
+  pairs use `w` at all (how often it is followed by any word). A pair that
+  goes together is a saving. "guy" is 3.53 nats likelier after "this" than
+  on its own (a fit of −3.53), and 2.31 less likely after "thus" (+2.31).
+
+One weight used to scale `−ln P(w | v)` as a whole, so asking for pairs
+that go together also pushed toward common words: at 0.3, hearings
+collapsed into "information" and "scientifically". `--commonness` and
+`--fit` weight the two apart.
+
+Fit is measured against the pairs' own `Q`, not wordfreq's `P`, so that it
+averages to zero and says only how a word goes with the one before. Against
+`P`, it also carried the gap between the two corpora, after any word: by
+`ln(P(w) / Q(w))`, a token-weighted 0.64 nats on average. Fiction's words
+got a discount everywhere ("shook" −3.2, "stood" −2.6, "looked" −2.3), and
+contractions, which the Google counts split into parts, cost 11–12 nats
+after any word ("she's", "it's", "let's", "that's"; "can't" 7). Words the
+pairs lack keep wordfreq's `P`, so their fit stays near zero.
 
 "kiss the sky" at `--commonness 0.005`: fit 0 hears "case thus chi"
 ("thus" is closer in sound); 0.05, "case this guy"; 0.2, "gives us gae",
