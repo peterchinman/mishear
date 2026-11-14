@@ -20,6 +20,8 @@ interface NumberKnob {
   key: string;
   label: string;
   hint: string;
+  /** The technical description, behind the knob's ⓘ button. */
+  info: string;
   min: number;
   max: number;
   step: number;
@@ -33,6 +35,8 @@ interface BoolKnob {
   key: string;
   label: string;
   hint: string;
+  /** The technical description, behind the knob's ⓘ button. */
+  info: string;
   heavy?: boolean;
 }
 interface ChoiceKnob {
@@ -40,6 +44,8 @@ interface ChoiceKnob {
   key: string;
   label: string;
   hint: string;
+  /** The technical description, behind the knob's ⓘ button. */
+  info: string;
   options: { value: string; label: string }[];
   heavy?: boolean;
 }
@@ -47,12 +53,13 @@ type Knob = NumberKnob | BoolKnob | ChoiceKnob;
 type Group = 'search' | 'cost' | 'lexicon';
 
 const SEARCH_KNOBS: Knob[] = [
-  { type: 'number', key: 'results', label: 'results', hint: 'How many hearings to return: the exact top N.', min: 1, max: 50, step: 1 },
+  { type: 'number', key: 'results', label: 'results', hint: 'How many hearings to show.', info: 'The exact top N hearings by total cost. With “only within cost” on, at most N of those within that cost.', min: 1, max: 50, step: 1 },
   {
     type: 'number',
     key: 'within',
     label: 'only within cost',
-    hint: 'Return hearings costing at most this (up to N of them), exactly. Faster; may return fewer. Off: the bound starts at 2 and rises until N are found.',
+    hint: 'Only show hearings cheaper than this. Faster, but may show fewer.',
+    info: 'Return hearings costing at most this (up to N of them), exactly. Faster; may return fewer. Off: the bound starts at 2 and rises until N are found.',
     min: 0.5,
     max: 15,
     step: 0.1,
@@ -62,7 +69,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'familiar',
     label: 'familiar words',
-    hint: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no commonness, and a rarer word pays for how much rarer it is than the last of them. Commonness sets how steep that edge is. Off: every word pays for all its rarity, “the” included, so commonness also favors hearings of fewer words.',
+    hint: 'Vocabulary size: this many of the most common words pay no rarity cost.',
+    info: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no commonness, and a rarer word pays for how much rarer it is than the last of them. Commonness sets how steep that edge is. Off: every word pays for all its rarity, “the” included, so commonness also favors hearings of fewer words.',
     min: 500,
     max: 50000,
     step: 500,
@@ -72,7 +80,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'commonness',
     label: 'commonness',
-    hint: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ (all of it when “familiar words” is off): how much common words are preferred, or how steep the edge of the vocabulary is. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. 0: a rare word costs no more than “the”. With “familiar words” off and this high, hearings collapse into single long words (“recommendations”).',
+    hint: 'How strongly common words are preferred over rare ones.',
+    info: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ (all of it when “familiar words” is off): how much common words are preferred, or how steep the edge of the vocabulary is. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. 0: a rare word costs no more than “the”. With “familiar words” off and this high, hearings collapse into single long words (“recommendations”).',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -81,17 +90,19 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'fit',
     label: 'fit',
-    hint: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
+    hint: 'How much each word must make sense after the one before.',
+    info: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s penalty + commonness + fit never goes below zero.',
     min: 0,
     max: 0.5,
     step: 0.005,
   },
-  { type: 'number', key: 'word_penalty', label: 'word penalty', hint: 'Cost per word. Higher prefers fewer, longer words.', min: 0, max: 2, step: 0.01 },
+  { type: 'number', key: 'word_penalty', label: 'word penalty', hint: 'Cost per word: higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s penalty + commonness + fit never goes below zero.', min: 0, max: 2, step: 0.01 },
   {
     type: 'number',
     key: 'shortlist',
     label: 'bigram shortlist',
-    hint: 'With fit above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
+    hint: 'Pair-search width: wider is more exact and slower.',
+    info: 'With fit above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
     min: 5,
     max: 200,
     step: 1,
@@ -100,7 +111,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'beam',
     label: 'bigram beam',
-    hint: 'With fit above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small fit, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
+    hint: 'Partial hearings the pair search keeps: wider is more exact, slower.',
+    info: 'With fit above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small fit, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
     min: 10,
     max: 400,
     step: 10,
@@ -109,13 +121,15 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'bool',
     key: 'distinct_sounds',
     label: 'merge same-sound hearings',
-    hint: 'Treat hearings that sound alike (“there” / “their”) as one, keeping the cheapest spelling. Off: list every spelling.',
+    hint: 'Merge hearings that sound the same (“there” / “their”).',
+    info: 'Treat hearings with the same sounds, spelled differently, as one, keeping the cheapest spelling. Off: list every spelling.',
   },
   {
     type: 'number',
     key: 'novelty',
     label: 'novelty',
-    hint: 'Extra cost per heard word that the line already contains, in any form: possessives, plurals and other spellings (“music’s” for “music”, “neighbors” for “neighbour’s”). 0 lets the line hear itself back.',
+    hint: 'Penalty for hearing the line’s own words back, in any form.',
+    info: 'Extra cost per heard word that the line already contains, in any form: possessives, plurals and other spellings (“music’s” for “music”, “neighbors” for “neighbour’s”). 0 lets the line hear itself back.',
     min: 0,
     max: 5,
     step: 0.05,
@@ -124,7 +138,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'variety',
     label: 'variety',
-    hint: 'Extra cost per word an earlier hearing in the list used, in any form (“arrive” after “arrives”), or a homophone of one (“cents” after “sense”), as novelty does for the line’s own words. Each hearing is then the best one given those above it, so the list varies. 0: the plain top N, which often differ by a word. With bigrams on, it slows the search several-fold.',
+    hint: 'Penalty for reusing words from the hearings above, so the list varies.',
+    info: 'Extra cost per word an earlier hearing in the list used, in any form (“arrive” after “arrives”), or a homophone of one (“cents” after “sense”), as novelty does for the line’s own words. Each hearing is then the best one given those above it, so the list varies. 0: the plain top N, which often differ by a word. With bigrams on, it slows the search several-fold.',
     min: 0,
     max: 5,
     step: 0.05,
@@ -133,7 +148,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'root',
     label: 'same-root penalty',
-    hint: 'Extra cost per heard word sharing a stem with a word of the line: “flying” for “fly in”, “flies” for “fly” (Snowball English stemmer, on American spellings). The same word counts too, on top of novelty. Irregular forms (“flew”) aren’t caught.',
+    hint: 'Penalty for words sharing a root with the line’s (“flying” for “fly”).',
+    info: 'Extra cost per heard word sharing a stem with a word of the line: “flying” for “fly in”, “flies” for “fly” (Snowball English stemmer, on American spellings). The same word counts too, on top of novelty. Irregular forms (“flew”) aren’t caught.',
     min: 0,
     max: 5,
     step: 0.05,
@@ -142,7 +158,8 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'function_share',
     label: 'function-word share',
-    hint: 'The share of the novelty and same-root costs charged when the line’s word is a function word (the 150 most frequent).',
+    hint: 'How much of those penalties small words like “the” pay.',
+    info: 'The share of the novelty and same-root costs charged when the line’s word is a function word (the 150 most frequent).',
     min: 0,
     max: 1,
     step: 0.05,
@@ -151,25 +168,27 @@ const SEARCH_KNOBS: Knob[] = [
     type: 'number',
     key: 'crossing',
     label: 'cross word boundaries',
-    hint: 'Reward per word boundary of the line that a hearing cuts across (“this guy” for “the sky” cuts the|sky). Charged instead as a cost on each boundary a hearing keeps: that ranks hearings the same way and keeps the search exact, so the costs shown include it.',
+    hint: 'Reward for cutting across the line’s word breaks (“this guy” for “the sky”).',
+    info: 'Reward per word boundary of the line that a hearing cuts across (“this guy” for “the sky” cuts the|sky). Charged instead as a cost on each boundary a hearing keeps: that ranks hearings the same way and keeps the search exact, so the costs shown include it.',
     min: 0,
     max: 3,
     step: 0.05,
   },
-  { type: 'number', key: 'max_bound', label: 'max bound', hint: 'How far the top-N search may raise its bound before it settles for fewer.', min: 2, max: 60, step: 0.5 },
+  { type: 'number', key: 'max_bound', label: 'max bound', hint: 'How far the search keeps looking before settling for fewer results.', info: 'The top-N search raises its cost bound in rounds until N hearings fit under it; this caps the bound. Lower is faster on lines with few good hearings, and may return fewer.', min: 2, max: 60, step: 0.5 },
 ];
 
 const COST_KNOBS: Knob[] = [
-  { type: 'number', key: 'vowel_substitution', label: 'vowel substitution', hint: 'Cost of hearing one vowel as the farthest-apart other; nearer vowels cost proportionally less.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'consonant_substitution', label: 'consonant substitution', hint: 'The same for consonants.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'stressed_vowel_indel', label: 'stressed vowel add/drop', hint: 'Hearing a stressed vowel (a syllable) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'unstressed_vowel_indel', label: 'unstressed vowel add/drop', hint: 'The same for an unstressed vowel (mostly a schwa).', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'consonant_indel', label: 'consonant add/drop', hint: 'Hearing a consonant that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { type: 'number', key: 'vowel_substitution', label: 'vowel substitution', hint: 'Cost of hearing one vowel as another.', info: 'Cost of hearing one vowel as the farthest-apart other on the vowel chart; nearer vowels cost proportionally less.', min: 0, max: 3, step: 0.05 },
+  { type: 'number', key: 'consonant_substitution', label: 'consonant substitution', hint: 'Cost of hearing one consonant as another.', info: 'Cost of hearing one consonant as the most different other, by place, manner, voicing and sibilance; closer consonants cost proportionally less.', min: 0, max: 3, step: 0.05 },
+  { type: 'number', key: 'stressed_vowel_indel', label: 'stressed vowel add/drop', hint: 'Cost of adding or dropping a stressed syllable.', info: 'Hearing a stressed vowel (a syllable) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { type: 'number', key: 'unstressed_vowel_indel', label: 'unstressed vowel add/drop', hint: 'Cost of adding or dropping an unstressed syllable.', info: 'Hearing an unstressed vowel (mostly a schwa) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { type: 'number', key: 'consonant_indel', label: 'consonant add/drop', hint: 'Cost of adding or dropping a consonant.', info: 'Hearing a consonant that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
   {
     type: 'number',
     key: 'stress_mismatch',
     label: 'rhythm (stress mismatch)',
-    hint: 'Extra for hearing a stressed vowel as an unstressed one or the reverse: how closely a hearing must keep the line’s rhythm.',
+    hint: 'How closely hearings must keep the line’s rhythm.',
+    info: 'Extra for hearing a stressed vowel as an unstressed one or the reverse: how closely a hearing must keep the line’s rhythm.',
     min: 0,
     max: 2,
     step: 0.05,
@@ -178,7 +197,8 @@ const COST_KNOBS: Knob[] = [
     type: 'number',
     key: 'swap',
     label: 'adjacent swap',
-    hint: 'Hearing two adjacent consonants swapped (“ask” ↔ “aks”) as one edit at this cost. Off: no swaps.',
+    hint: 'Allow swapped neighbouring consonants (“ask” ↔ “aks”) at this cost.',
+    info: 'Hearing two adjacent consonants swapped (“ask” ↔ “aks”) as one edit at this cost. Off: no swaps.',
     min: 0,
     max: 2,
     step: 0.05,
@@ -187,13 +207,14 @@ const COST_KNOBS: Knob[] = [
 ];
 
 const LEXICON_KNOBS: Knob[] = [
-  { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'The most frequent words kept. Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
-  { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Every CMUdict pronunciation of a word, or only the first.', heavy: true },
+  { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'How many of the most common words hearings can use.', info: 'The most frequent words kept from the word-frequency list, after the word list’s filter. Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
+  { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Use every dictionary pronunciation of a word, not just the first.', info: 'Match each word under every CMUdict pronunciation (“either” as EE-ther and EYE-ther), or only its first. Changing it rebuilds the lexicon.', heavy: true },
   {
     type: 'choice',
     key: 'word_list',
     label: 'word list',
-    hint: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, and words said as their letters (“TV”, “UK”).',
+    hint: 'Which words count as real words.',
+    info: 'Which words hearings may use, besides contractions and possessives of them (“it’s”, “people’s”). ENABLE: a Scrabble list, no names, brands or abbreviations, but words like “qi” and “haar”. SCOWL: a spell-checker list graded by commonness, kept up to the level below; names, places, days and months, no abbreviations. Every word: whatever is frequent enough. SCOWL and every word drop single letters but “a” and “I”, and words said as their letters (“TV”, “UK”).',
     options: [
       { value: 'enable', label: 'ENABLE' },
       { value: 'scowl', label: 'SCOWL' },
@@ -205,7 +226,8 @@ const LEXICON_KNOBS: Knob[] = [
     type: 'number',
     key: 'scowl_level',
     label: 'SCOWL level',
-    hint: 'With the SCOWL list: how rare a word may be. 35: common words; 50: a small dictionary’s; 60: a large one’s; 70–80: rare and obscure words (“haar”, “qi”).',
+    hint: 'With SCOWL: how rare a word may be (higher allows rarer).',
+    info: 'With the SCOWL list: how rare a word may be. 35: common words; 50: a small dictionary’s; 60: a large one’s; 70–80: rare and obscure words (“haar”, “qi”).',
     min: 10,
     max: 80,
     step: 5,
@@ -215,7 +237,8 @@ const LEXICON_KNOBS: Knob[] = [
     type: 'number',
     key: 'bigram_prior',
     label: 'bigram smoothing μ',
-    hint: 'Dirichlet smoothing: how far a rarely seen word pair falls back on the single-word frequency. The Google Books counts run to billions, so this is large; scores on held-out text barely change between 10,000 and 1,000,000.',
+    hint: 'How far rarely seen word pairs fall back on single-word frequencies.',
+    info: 'Dirichlet smoothing: how far a rarely seen word pair falls back on the single-word frequency. The Google Books counts run to billions, so this is large; scores on held-out text barely change between 10,000 and 1,000,000.',
     min: 1000,
     max: 1000000,
     step: 1000,
@@ -426,6 +449,18 @@ function showError(message: string): void {
 const fmt = (x: number, digits = 2) => x.toFixed(digits);
 const thousands = (x: number) => Math.round(x).toLocaleString('en-US');
 
+/** A knob's ⓘ button, and the technical description it shows and hides. */
+function infoToggle(knob: Knob): { button: HTMLButtonElement; text: HTMLParagraphElement } {
+  const text = el('p', { className: 'knob-info', textContent: knob.info, hidden: true });
+  const button = el('button', { type: 'button', className: 'info', textContent: 'ⓘ', title: 'More detail' });
+  button.setAttribute('aria-expanded', 'false');
+  button.addEventListener('click', () => {
+    text.hidden = !text.hidden;
+    button.setAttribute('aria-expanded', String(!text.hidden));
+  });
+  return { button, text };
+}
+
 /** Builds one knob's controls; `onChange(heavy)` fires on every edit. */
 function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElement {
   const values = groupValues(group);
@@ -434,6 +469,7 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
   const head = el('div', { className: 'knob-head' });
   const reset = el('button', { type: 'button', className: 'reset', textContent: 'reset', title: `Default: ${def ?? 'off'}` });
   const markChanged = () => wrap.classList.toggle('changed', values[knob.key] !== def);
+  const info = infoToggle(knob);
   const commit = () => {
     markChanged();
     onChange();
@@ -453,8 +489,8 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
       select.value = String(def);
       commit();
     });
-    head.append(el('label', { className: 'name' }, `${knob.label} `, select), reset);
-    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }));
+    head.append(el('label', { className: 'name' }, `${knob.label} `, select), info.button, reset);
+    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }), info.text);
     wrap.dataset.key = knob.key;
     markChanged();
     return wrap;
@@ -471,8 +507,8 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
       box.checked = Boolean(def);
       commit();
     });
-    head.append(el('label', { className: 'name' }, box, ` ${knob.label}`), reset);
-    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }));
+    head.append(el('label', { className: 'name' }, box, ` ${knob.label}`), info.button, reset);
+    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }), info.text);
     wrap.dataset.key = knob.key;
     markChanged();
     return wrap;
@@ -528,8 +564,8 @@ function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElemen
     }
     commit();
   });
-  head.append(el('label', { className: 'name' }, ...(optional ? [box, ' '] : []), knob.label), reset);
-  wrap.append(head, el('div', { className: 'knob-inputs' }, range, number), el('p', { className: 'hint', textContent: knob.hint }));
+  head.append(el('label', { className: 'name' }, ...(optional ? [box, ' '] : []), knob.label), info.button, reset);
+  wrap.append(head, el('div', { className: 'knob-inputs' }, range, number), el('p', { className: 'hint', textContent: knob.hint }), info.text);
   wrap.classList.toggle('off', optional && (current === undefined || current === null));
   wrap.dataset.key = knob.key;
   markChanged();

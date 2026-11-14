@@ -164,7 +164,22 @@ aside summary {
   font-size: 0.9rem;
 }
 .knob-head .name {
-  flex: 1;
+  flex: 0 1 auto;
+}
+/* The ⓘ sits after the name; the reset button keeps to the right. */
+.knob-head .info {
+  margin-right: auto;
+  padding: 0 0.2rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.knob-head .info:hover,
+.knob-head .info[aria-expanded='true'] {
+  color: var(--accent);
 }
 .knob.changed .name::after {
   content: ' •';
@@ -195,6 +210,14 @@ aside summary {
 }
 .knob .hint {
   margin: 0.1rem 0 0;
+}
+.knob-info {
+  margin: 0.3rem 0 0;
+  padding: 0.35rem 0.5rem;
+  border-left: 2px solid var(--accent);
+  background: Canvas;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 /* ---- workspace ---- */
