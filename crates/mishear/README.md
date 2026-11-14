@@ -55,7 +55,7 @@ crates/mishear/scripts/google_bigrams.sh
 `--word-list` (the page's "word list") picks which words hearings may use,
 besides contractions and possessives of them ("it's", "don't", "people's"):
 
-- **`enable`** (default): the ENABLE word list
+- **`enable`**: the ENABLE word list
   ([`data/ENABLE`](../../data/ENABLE), public domain, committed), as in
   rhyme-golf. No names, brands or abbreviations, and every inflected form
   ("heard", "women"), but it is a Scrabble list: it keeps "haar", "qi" and
@@ -69,8 +69,8 @@ besides contractions and possessives of them ("it's", "don't", "people's"):
   places, days and months are in; abbreviations aren't.
   `scripts/scowl_levels.py` regenerates the list (the words CMUdict can
   pronounce, with their lowest level).
-- **`none`** (or `--all-words`): every word frequent enough to be in the
-  vocabulary, brands and foreign names included.
+- **`none`** (default, or `--all-words`): every word frequent enough to be
+  in the vocabulary, brands and foreign names included.
 
 `scowl` and `none` also drop single letters but "a" and "I", and
 abbreviations: words CMUdict pronounces as their letters' names ("tv",
@@ -162,23 +162,22 @@ of the input. Its cost adds up three things:
 
 - **Phonetic cost.** A weighted edit distance whose substitution costs come
   from mime-reader's vowel and consonant distance engines, on a 0–1 scale.
-- **Language-model cost.** Per word, `0.4` plus two parts, floored at zero
+- **Language-model cost.** Per word, `0.46` plus two parts, floored at zero
   (see "Commonness and fit" below):
-  - **commonness**, `0.005 × −ln P(word)`, with `P` from wordfreq: how rare
-    the word is (with `--familiar N`, only its rarity beyond the N most
-    frequent words', see "The edge of the vocabulary");
-  - **fit**, `0.005 × ln(Q(word) / P(word | previous word))`, both from
+  - **commonness**, `0.19 × −ln P(word)` beyond the 12,000 most frequent
+    words' (`--familiar`, see "The edge of the vocabulary"), with `P` from
+    wordfreq: how rare the word is;
+  - **fit**, `0.215 × ln(Q(word) / P(word | previous word))`, both from
     word-pair counts in Google Books fiction: how much less likely the word
     is after the one before than on its own (a saving when they go
     together).
     `--unigram` (fit 0) leaves it out.
-- **Extra costs.** The mishearing engine charges 0.9 for each word the
+- **Extra costs.** The mishearing engine charges 0.6 for each word the
   original line contains, in any form (see "Same word"), and a fifth of
-  that for function words; 0.2 for
-  each word sharing a stem with the line's (`--root`); 0.2 for each of the
-  line's word boundaries a hearing keeps (`--crossing`). And each hearing
-  after the first pays 1.0 for each word an earlier one used (`--variety`;
-  see "Variety").
+  that for function words; 0.85 for each word sharing a stem with the
+  line's (`--root`); 0.4 for each of the line's word boundaries a hearing
+  keeps (`--crossing`). And each hearing after the first pays 0.55 for each
+  word an earlier one used (`--variety`; see "Variety").
 
 There are two passes:
 
@@ -192,31 +191,33 @@ There are two passes:
 
 The weights below are judgment calls, picked by looking at output. They
 weren't fitted to data, so they are all flags. `sweep` loads the engine once
-and runs a grid of them. The defaults were set on 2026-11-08 to settings
-chosen in the web page: few results, a light word prior, a heavier word
-penalty, bigrams, and some pull toward new roots and boundaries.
+and runs a grid of them. The defaults were last set on 2026-11-14, from
+settings chosen in the web page: every word in the lexicon, a vocabulary
+edge at 12,000 words with a steep rarity cost beyond it, a strong pull
+toward word pairs that make sense, and strong pulls away from the line's
+own words and roots.
 
 The examples and timings in the rest of "Search" were measured under the
 earlier defaults. To reproduce them, add `--unigram --lm 0.05
---word-penalty 0.1 --novelty 1 --root 0 --crossing 0 -n 8`, unless an
-example names its own.
+--word-penalty 0.1 --novelty 1 --root 0 --crossing 0 --variety 0
+--familiar 0 --word-list enable -n 8`, unless an example names its own.
 
 | flag | default | what it trades |
 |---|---|---|
-| `--commonness` | 0.005 | sound against how common each word is; with `--familiar`, how steep the vocabulary's edge is |
-| `--familiar` | off | the listener's vocabulary: the N most frequent words pay no commonness |
-| `--fit` | 0.005 | sound against how well each word follows the one before (0: words alone, exactly) |
+| `--commonness` | 0.19 | sound against how common each word is; with `--familiar`, how steep the vocabulary's edge is |
+| `--familiar` | 12000 (0: off) | the listener's vocabulary: the N most frequent words pay no commonness |
+| `--fit` | 0.215 | sound against how well each word follows the one before (0: words alone, exactly) |
 | `--lm` | – | sets `--commonness` and `--fit` both: the single weight they replaced |
-| `--word-penalty` | 0.4 | many short words against few long ones |
+| `--word-penalty` | 0.46 | many short words against few long ones |
 | `--pronunciations first\|all` | all | more ways to hear a word, against more chance matches |
 | `--bigram-prior` | 1000 | with bigrams: trusting word pairs (small) against unigram frequency (large) |
 | `--unigram` | off (bigrams on) | exactness and speed, against fluency |
 | `--beam` | 100 | with bigrams: closer to exact (wider) against speed |
 | `--vocab`, `--all-words` | 50k, filtered | coverage against obscure words, names and brands |
-| `--novelty`, `--function-share` | 0.9, 0.2 | departing from the original's words |
-| `--root` | 0.2 | departing from the original's roots too ("flying" for "fly in") |
-| `--crossing` | 0.2 | hearings that cut across the original's word boundaries |
-| `--variety` | 1.0 | each hearing differing from those above it, against the plain top N |
+| `--novelty`, `--function-share` | 0.6, 0.2 | departing from the original's words |
+| `--root` | 0.85 | departing from the original's roots too ("flying" for "fly in") |
+| `--crossing` | 0.4 | hearings that cut across the original's word boundaries |
+| `--variety` | 0.55 | each hearing differing from those above it, against the plain top N |
 | `--stress-mismatch` | 0 | keeping the line's rhythm (extra cost when a stressed vowel pairs with an unstressed one) |
 | `--swap` | off | adjacent consonants exchanged as one edit ("ask" ↔ "aks") |
 | `--all-spellings` | off | listing homophone spellings separately, rather than merging hearings that sound the same |
@@ -283,7 +284,7 @@ ones a hearing can contain:
 - **Pruning by information beats pruning by count**, slightly: a pair's
   information is `c·ln(1 + c/(μ·P(w)))`, how much its count beats backing
   off.
-- **Where the gain shows.** At the default fit (0.005) the pairs add only
+- **Where the gain shows.** At fit 0.005 (the default then) the pairs add only
   about 0.01–0.03 per word, so they change about a third of the hearings
   and rarely the best; the hearings' word pairs are mostly unseen ("toothy
   rub"), as they should be. At `--lm 0.05` (commonness and fit both), two
@@ -452,7 +453,7 @@ the same way.
 
 The plain top N tend to be one hearing respelled: "sin spurs affair at
 marathons", "seen spurs affair at marathons", "sense persevere at
-marathons", … `--variety F` (default 1.0) treats the hearings above each
+marathons", … `--variety F` (default 0.55) treats the hearings above each
 one as novelty treats the line: each word an earlier hearing used costs F
 more, in any form ("arrive" after "arrives"), as does any homophone of it
 ("cents" after "sense"). Function words

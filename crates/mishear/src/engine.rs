@@ -70,19 +70,25 @@ pub struct Variety {
     pub function_word_share: f32,
 }
 
+/// The defaults the user chose in the web page (2026-11-14), which the page
+/// and the command line both start from.
 impl Default for MishearConfig {
     fn default() -> Self {
         Self {
             search: SearchConfig {
                 results: 4,
                 bound: 2.0,
+                commonness: 0.19,
+                familiar: Some(12_000),
+                fit: 0.215,
+                word_penalty: 0.46,
                 ..SearchConfig::default()
             },
-            novelty: 0.9,
+            novelty: 0.6,
             function_word_share: 0.2,
-            root: 0.2,
-            crossing: 0.2,
-            variety: 1.0,
+            root: 0.85,
+            crossing: 0.4,
+            variety: 0.55,
             max_bound: 30.0,
         }
     }

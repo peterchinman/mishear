@@ -36,25 +36,26 @@ SEARCH OPTIONS
   --within X         every match costing at most X (otherwise the exact top N)
   --novelty F        mishear/hear/examples: cost per word shared with the line,
                      in any form ('music's', 'neighbors' for 'neighbour')
-                     (default 0.9; function words a fifth of that)
+                     (default 0.6; function words a fifth of that)
   --commonness F     cost per nat of a word's rarity, −ln P(word), beyond the
                      --familiar words': how much common words are preferred,
                      or how steep the edge of the listener's vocabulary is
-                     (default 0.005; 0 ignores frequency)
+                     (default 0.19; 0 ignores frequency)
   --familiar N       the listener's vocabulary: the lexicon's N most frequent
                      words pay no commonness, rarer ones pay for how much
-                     rarer they are than the Nth (default off: every word
-                     pays for all its rarity, which favors fewer words)
+                     rarer they are than the Nth (default 12000; 0 is off:
+                     every word pays for all its rarity, which favors fewer
+                     words)
   --fit F            cost per nat of a word's misfit after the one before,
                      ln(Q(word) / P(word | previous)), both from the word-pair
                      counts, a saving when they go together: how much
                      hearings' word pairs must make sense
-                     (default 0.005; 0 scores words alone, exactly). A word's
+                     (default 0.215; 0 scores words alone, exactly). A word's
                      penalty + commonness + fit is floored at zero.
   --lm F             sets --commonness and --fit both (the single weight
                      they replace)
   --word-penalty F   cost per word: higher prefers fewer, longer words
-                     (default 0.4)
+                     (default 0.46)
   --pronunciations first|all
                      match words under every CMUdict pronunciation or only
                      the first (default all)
@@ -65,14 +66,14 @@ SEARCH OPTIONS
                      word costs (default 0.2)
   --root F           mishear/examples: cost per heard word sharing a stem
                      with a word of the line ('flying' for 'fly in'; the
-                     same word included, on top of --novelty) (default 0.2)
+                     same word included, on top of --novelty) (default 0.85)
   --variety F        mishear/examples: cost per word an earlier hearing used,
                      in any form (or a homophone of one), so each hearing
                      differs from those above it; 0 lists the plain top N
-                     (default 1.0)
+                     (default 0.55)
   --crossing F       mishear/examples: reward per word boundary of the line
                      a hearing cuts across ('this guy' cuts 'the|sky'),
-                     charged as a cost on each boundary kept (default 0.2)
+                     charged as a cost on each boundary kept (default 0.4)
   --stress-mismatch F  extra cost for pairing a stressed vowel with an
                      unstressed one: how much hearings keep the rhythm
                      (default 0)
@@ -94,7 +95,7 @@ SEARCH OPTIONS
   --bigram-file PATH other word-pair counts (implies --bigrams)
   --word-list enable|scowl|none
                      which words the lexicon may hold, besides contractions
-                     and possessives of them (default enable):
+                     and possessives of them (default none):
                      enable: the ENABLE word list, data/ENABLE (no names,
                        brands or abbreviations; Scrabble words such as 'qi');
                      scowl: SCOWL's words up to --scowl-level, data/SCOWL
@@ -208,7 +209,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         deformation: Deformation::new(""),
         lines: 6,
         line_seed: 1,
-        word_list: WordList::Enable,
+        word_list: WordList::None,
         scowl_level: DEFAULT_SCOWL_LEVEL,
         unigram: false,
         bigrams_required: false,
@@ -222,7 +223,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         function_share: d.function_word_share,
         lm_values: None,
         commonness_values: None,
-        familiar: None,
+        familiar: d.search.familiar,
         familiar_values: None,
         fit_values: None,
         penalty_values: None,
@@ -257,11 +258,10 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--commonness" => o.commonness = number(value("--commonness")?)?,
             "--fit" => o.fit = number(value("--fit")?)?,
             "--familiar" => {
-                o.familiar = Some(
-                    value("--familiar")?
-                        .parse()
-                        .map_err(|e| format!("--familiar: {e}"))?,
-                )
+                let n: usize = value("--familiar")?
+                    .parse()
+                    .map_err(|e| format!("--familiar: {e}"))?;
+                o.familiar = (n > 0).then_some(n);
             }
             "--familiar-values" => o.familiar_values = Some(numbers(&value("--familiar-values")?)?),
             "--commonness-values" => {

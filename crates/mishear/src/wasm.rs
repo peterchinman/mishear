@@ -592,13 +592,13 @@ pub fn catalog() -> CatalogDto {
 /// Every knob's default.
 #[wasm_bindgen]
 pub fn defaults() -> DefaultsDto {
-    let search = SearchConfig::default();
     let mishear = MishearConfig::default();
+    let search = mishear.search.clone();
     DefaultsDto {
         lexicon: LexiconOptions {
             vocabulary: 50_000,
             all_pronunciations: true,
-            word_list: WordListDto::Enable,
+            word_list: WordListDto::None,
             scowl_level: DEFAULT_SCOWL_LEVEL,
             bigram_prior: BIGRAM_PRIOR,
         },
