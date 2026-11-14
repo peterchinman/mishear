@@ -1,26 +1,15 @@
 // Messages between the page and the engine worker.
-import type {
-  CatalogDto,
-  DefaultsDto,
-  DeformationDto,
-  LexiconInfoDto,
-  LexiconOptions,
-  PreviewDto,
-  RequestDto,
-  ResultDto,
-} from 'mishear';
+import type { DefaultsDto, LexiconInfoDto, LexiconOptions, RequestDto, ResultDto } from 'mishear';
 
 export type ToWorker =
   /** Starts the engine with these lexicon options over the defaults. */
   | { type: 'init'; lexicon: Partial<LexiconOptions> }
-  | { type: 'run'; id: number; lexicon: LexiconOptions; request: RequestDto }
-  | { type: 'preview'; id: number; deformation: DeformationDto };
+  | { type: 'run'; id: number; lexicon: LexiconOptions; request: RequestDto };
 
 export type FromWorker =
   | { type: 'status'; message: string }
   | {
       type: 'ready';
-      catalog: CatalogDto;
       defaults: DefaultsDto;
       info: LexiconInfoDto;
       /** The lexicon options it was built with. */
@@ -39,7 +28,6 @@ export type FromWorker =
       /** Something the page should say, such as missing word-pair counts. */
       notice?: string;
     }
-  | { type: 'preview'; id: number; preview: PreviewDto }
   | { type: 'error'; id?: number; message: string };
 
 export function sameLexicon(a: LexiconOptions | null, b: LexiconOptions | null): boolean {

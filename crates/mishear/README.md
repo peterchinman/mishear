@@ -105,9 +105,10 @@ Deformation options combine and apply in order:
 
 ## Web app
 
-`web/` is a page that exposes every knob. The engine is compiled to
-WebAssembly and runs in a Web Worker. It needs `wasm-pack` and the data from
-Setup.
+`web/` is a page that exposes every search, cost and lexicon knob. It hears
+lines as spoken: deformations (accents, vowel moves) are on the command line
+only. The engine is compiled to WebAssembly and runs in a Web Worker. It
+needs `wasm-pack` and the data from Setup.
 
 **Demo:** <https://peterchinman.github.io/mime-reader/>. The workflow
 `.github/workflows/mishear-pages.yml` builds it on every push to
@@ -127,24 +128,15 @@ npm run build   # the same, into dist/
 What the page has:
 
 - **Input:** a line of text, or ARPAbet phonemes heard as given (no
-  deformation, no novelty).
+  novelty).
 - **Random line:** picks from the public-domain poems in `data/echo/public`.
   The private corpus is never bundled.
-- **Deformation:** off by default. A switch applies the steps or bypasses
-  them, so you can compare without deleting anything; adding a step switches
-  it on. The steps form an ordered list (accent presets, consonant knobs,
-  vowel moves with masks and Labov's tendencies), plus intensity and seed.
-  For a pull step, you can click the chart to choose its target.
-- **Vowel chart:** a preview of the vowel-space moves.
-- **Results:** the hearings, with their cost breakdown; a grid aligning each
-  heard word with the phonemes it covers; and, in a collapsible "Sounds"
-  section, each word's spoken and deformed phonemes, with the deformation's
-  edits marked.
+- **Results:** the hearings, with their cost breakdown, and a grid aligning
+  each heard word with the phonemes it covers.
 - **Search, cost and lexicon panels:** every field of `SearchConfig`,
   `CostConfig` and the lexicon options. Defaults come from the Rust side.
   Changing the lexicon rebuilds it in the worker.
-- **Sweep:** the CLI `sweep` for any numeric search or cost knob, or for
-  intensity or seed.
+- **Sweep:** the CLI `sweep` for any numeric search or cost knob.
 - **Saving:** settings are kept in localStorage, and "Copy link" puts them in
   the URL.
 

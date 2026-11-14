@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>mishear</h1>
-      <p class="tagline">Deform a line's sounds, then hear other words in them.</p>
+      <p class="tagline">Hear other words in a line's sounds.</p>
       <p id="status" class="status" role="status">Loading…</p>
     </header>
     <main>
@@ -18,33 +18,6 @@
           <button id="reset-all" type="button">Reset every knob</button>
           <button id="copy-link" type="button">Copy link to these settings</button>
         </div>
-        <details open id="deformation-panel">
-          <summary>Deformation <span id="deform-state" class="summary-note"></span></summary>
-          <div class="panel-body">
-            <label class="row deform-toggle"
-              ><input id="deform" type="checkbox" /> Deform the line before hearing it</label
-            >
-            <div id="deformation-body">
-            <p class="hint">
-              Steps apply in order. Accents bundle consonant rules and vowel moves; you can also add
-              the pieces one at a time. Adding a step turns deformation on.
-            </p>
-            <ol id="steps" class="steps"></ol>
-            <select id="add-step" aria-label="Add a step"></select>
-            <div id="deformation-knobs"></div>
-            <figure class="chart">
-              <svg id="vowel-chart" viewBox="0 0 320 280" role="img" aria-label="Vowel chart"></svg>
-              <figcaption>
-                <span id="vowel-changes"></span>
-                <span class="hint"
-                  >Grey: General American (Hillenbrand et al. 1995). Colored: after the vowel-space
-                  moves. Accent rules that rewrite vowels by context aren't drawn.</span
-                >
-              </figcaption>
-            </figure>
-            </div>
-          </div>
-        </details>
         <details open>
           <summary>Search</summary>
           <div class="panel-body" id="search-knobs"></div>
@@ -91,14 +64,9 @@
           <ol id="hearings" class="hearings"></ol>
           <p id="stats" class="hint"></p>
           <h3>Alignment</h3>
-          <p class="hint">Each heard word over the (deformed) phonemes it covers.</p>
+          <p class="hint">Each heard word over the phonemes it covers.</p>
           <div class="alignment-scroll"><div id="alignment" class="alignment"></div></div>
         </section>
-        <details id="sounds-section" class="section" open hidden>
-          <summary><h2>Sounds</h2></summary>
-          <p id="deformation-name" class="hint"></p>
-          <table id="sounds" class="sounds"></table>
-        </details>
         <section id="sweep-section" hidden>
           <h2 id="sweep-title">Sweep</h2>
           <div id="sweep" class="sweep"></div>

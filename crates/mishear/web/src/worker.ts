@@ -1,6 +1,6 @@
 // Hosts the engine off the main thread: a search can take a second, and
 // rebuilding the lexicon a few.
-import init, { MishearApp, catalog, defaults, type LexiconOptions } from 'mishear';
+import init, { MishearApp, defaults, type LexiconOptions } from 'mishear';
 import { sameLexicon, type FromWorker, type ToWorker } from './protocol';
 
 const post = (message: FromWorker) => self.postMessage(message);
@@ -73,7 +73,6 @@ async function start(overrides: Partial<LexiconOptions>): Promise<void> {
   lexicon = options;
   post({
     type: 'ready',
-    catalog: catalog(),
     defaults: defaults(),
     info: app.lexiconInfo(),
     lexicon: options,
@@ -113,8 +112,6 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
             ? 'No word-pair counts (run crates/mishear/scripts/bigrams.py, then npm run data): scoring words alone.'
             : undefined,
       });
-    } else if (message.type === 'preview') {
-      post({ type: 'preview', id: message.id, preview: app.preview(message.deformation) });
     }
   } catch (err) {
     post({
