@@ -158,7 +158,8 @@ of the input. Its cost adds up three things:
 - **Language-model cost.** Per word, `0.4` plus two parts, floored at zero
   (see "Commonness and fit" below):
   - **commonness**, `0.005 × −ln P(word)`, with `P` from wordfreq: how rare
-    the word is;
+    the word is (with `--familiar N`, only its rarity beyond the N most
+    frequent words', see "The edge of the vocabulary");
   - **fit**, `0.005 × ln(Q(word) / P(word | previous word))`, both from
     word-pair counts in Google Books fiction: how much less likely the word
     is after the one before than on its own (a saving when they go
@@ -195,7 +196,8 @@ example names its own.
 
 | flag | default | what it trades |
 |---|---|---|
-| `--commonness` | 0.005 | sound against how common each word is |
+| `--commonness` | 0.005 | sound against how common each word is; with `--familiar`, how steep the vocabulary's edge is |
+| `--familiar` | off | the listener's vocabulary: the N most frequent words pay no commonness |
 | `--fit` | 0.005 | sound against how well each word follows the one before (0: words alone, exactly) |
 | `--lm` | – | sets `--commonness` and `--fit` both: the single weight they replaced |
 | `--word-penalty` | 0.4 | many short words against few long ones |
@@ -310,6 +312,23 @@ pairs lack keep wordfreq's `P`, so their fit stays near zero.
 "kiss the sky" at `--commonness 0.005`: fit 0 hears "case thus chi"
 ("thus" is closer in sound); 0.05, "case this guy"; 0.2, "gives us gae",
 "tis thy sty": pairs that go together, of rare words.
+
+### The edge of the vocabulary
+
+Commonness charges every word for its rarity, and even "the" has some (3
+nats). So it also charges for each word: turned up, it favors hearings of
+fewer, longer words. At 0.5, "There was music from my neighbour's house
+through the summer nights" is heard as "recommendations": its own eleven
+words carry 82 nats of rarity, "recommendations" 11.
+
+`--familiar N` (the page's "familiar words") makes commonness a soft edge
+to the listener's vocabulary instead. The lexicon's N most frequent words
+pay no commonness; a rarer word pays commonness × how much rarer it is
+than the Nth, in nats. A hearing made of familiar words pays nothing,
+however many words it has. Commonness becomes the edge's steepness: word
+frequencies roughly follow Zipf's law, so a word twice as rare as the Nth
+pays 0.7 × commonness, ten times as rare 2.3 ×. Off, every word pays for
+all its rarity, as before.
 
 A good fit is a saving, so a word's penalty + commonness + fit could fall
 below zero. It is floored there: a fit can make a word free, never pay for

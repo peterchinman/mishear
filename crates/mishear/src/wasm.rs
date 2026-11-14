@@ -87,8 +87,11 @@ pub struct SearchDto {
     pub results: usize,
     /// Every match within this cost; `null` for the exact top `results`.
     pub within: Option<f32>,
-    /// Cost per nat of a word's rarity.
+    /// Cost per nat of a word's rarity beyond the familiar words'.
     pub commonness: f32,
+    /// The listener's vocabulary: the lexicon's most frequent words that pay
+    /// no commonness; `null`: every word pays for all its rarity.
+    pub familiar: Option<usize>,
     /// Cost per nat of a word's misfit after the one before; 0 scores words
     /// alone (and needs no word-pair counts).
     pub fit: f32,
@@ -417,6 +420,7 @@ impl MishearApp {
             results: s.results.max(1),
             bound: s.within.unwrap_or(2.0),
             commonness: s.commonness,
+            familiar: s.familiar,
             fit: s.fit,
             word_penalty: s.word_penalty,
             shortlist: s.shortlist,
@@ -602,6 +606,7 @@ pub fn defaults() -> DefaultsDto {
             results: mishear.search.results,
             within: None,
             commonness: search.commonness,
+            familiar: search.familiar,
             fit: search.fit,
             word_penalty: search.word_penalty,
             shortlist: search.shortlist,

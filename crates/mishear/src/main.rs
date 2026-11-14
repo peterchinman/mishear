@@ -37,9 +37,14 @@ SEARCH OPTIONS
   --novelty F        mishear/hear/examples: cost per word shared with the line,
                      in any form ('music's', 'neighbors' for 'neighbour')
                      (default 0.9; function words a fifth of that)
-  --commonness F     cost per nat of a word's rarity, −ln P(word): how much
-                     common words are preferred (default 0.005; 0 ignores
-                     frequency)
+  --commonness F     cost per nat of a word's rarity, −ln P(word), beyond the
+                     --familiar words': how much common words are preferred,
+                     or how steep the edge of the listener's vocabulary is
+                     (default 0.005; 0 ignores frequency)
+  --familiar N       the listener's vocabulary: the lexicon's N most frequent
+                     words pay no commonness, rarer ones pay for how much
+                     rarer they are than the Nth (default off: every word
+                     pays for all its rarity, which favors fewer words)
   --fit F            cost per nat of a word's misfit after the one before,
                      ln(Q(word) / P(word | previous)), both from the word-pair
                      counts, a saving when they go together: how much
@@ -121,6 +126,7 @@ DEFORMATION OPTIONS (combine freely; applied in order)
 SWEEP AND EVAL OPTIONS
   --lm-values A,B,…        sets commonness and fit both
   --commonness-values A,B,… (default: --commonness)
+  --familiar-values A,B,…  (default: --familiar; 0 is off)
   --fit-values A,B,…       (default: --fit)
   --penalty-values A,B,…   (default: --word-penalty)
   --pron-values first,all  (default: --pronunciations)
@@ -165,6 +171,8 @@ struct Options {
     function_share: f32,
     lm_values: Option<Vec<f32>>,
     commonness_values: Option<Vec<f32>>,
+    familiar: Option<usize>,
+    familiar_values: Option<Vec<f32>>,
     fit_values: Option<Vec<f32>>,
     penalty_values: Option<Vec<f32>>,
     pron_values: Option<Vec<bool>>,
@@ -213,6 +221,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         function_share: d.function_word_share,
         lm_values: None,
         commonness_values: None,
+        familiar: None,
+        familiar_values: None,
         fit_values: None,
         penalty_values: None,
         pron_values: None,
@@ -245,6 +255,14 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             }
             "--commonness" => o.commonness = number(value("--commonness")?)?,
             "--fit" => o.fit = number(value("--fit")?)?,
+            "--familiar" => {
+                o.familiar = Some(
+                    value("--familiar")?
+                        .parse()
+                        .map_err(|e| format!("--familiar: {e}"))?,
+                )
+            }
+            "--familiar-values" => o.familiar_values = Some(numbers(&value("--familiar-values")?)?),
             "--commonness-values" => {
                 o.commonness_values = Some(numbers(&value("--commonness-values")?)?)
             }
@@ -455,6 +473,7 @@ fn search_config(o: &Options) -> SearchConfig {
         results: o.results,
         bound: o.within.unwrap_or(2.0),
         commonness: o.commonness,
+        familiar: o.familiar,
         fit: if o.unigram { 0.0 } else { o.fit },
         word_penalty: o.word_penalty,
         beam: o.beam,
@@ -683,9 +702,12 @@ fn grid(o: &Options) -> Vec<Options> {
         .collect();
     // Each axis multiplies the grid, the first outermost.
     type Axis = (Option<Vec<f32>>, fn(&mut Options, f32));
-    let axes: [Axis; 10] = [
+    let axes: [Axis; 11] = [
         (o.lm_values.clone(), |o, v| (o.commonness, o.fit) = (v, v)),
         (o.commonness_values.clone(), |o, v| o.commonness = v),
+        (o.familiar_values.clone(), |o, v| {
+            o.familiar = (v >= 1.0).then_some(v as usize)
+        }),
         (o.fit_values.clone(), |o, v| o.fit = v),
         (o.penalty_values.clone(), |o, v| o.word_penalty = v),
         (o.stress_values.clone(), |o, v| o.stress_mismatch = v),
@@ -713,8 +735,9 @@ fn grid(o: &Options) -> Vec<Options> {
 
 fn label(o: &Options) -> String {
     format!(
-        "com {:<5} fit {:<5} pen {:<4} {:<5} stress {:<3} swap {:<3} nov {:<3} root {:<3} cross {:<3} var {:<3}",
+        "com {:<5} fam {:<6} fit {:<5} pen {:<4} {:<5} stress {:<3} swap {:<3} nov {:<3} root {:<3} cross {:<3} var {:<3}",
         o.commonness,
+        o.familiar.map_or("off".to_string(), |f| f.to_string()),
         if o.unigram { 0.0 } else { o.fit },
         o.word_penalty,
         if o.all_pronunciations { "all" } else { "first" },

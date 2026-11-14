@@ -48,9 +48,16 @@ pub struct SearchConfig {
     pub results: usize,
     /// Only matches costing at most this are returned (exactly).
     pub bound: f32,
-    /// Cost per nat of a word's rarity, `−ln P(word)`: how much common words
-    /// are preferred.
+    /// Cost per nat of a word's rarity, `−ln P(word)`, beyond the
+    /// [`Self::familiar`] words': how much common words are preferred, or
+    /// how steep the edge of the listener's vocabulary is.
     pub commonness: f32,
+    /// The listener's vocabulary: the lexicon's `familiar` most frequent
+    /// words pay no commonness, and a rarer word pays for how much rarer it
+    /// is than the last of them. `None`: every word pays for all its rarity
+    /// (as if the vocabulary were empty), so commonness also charges for
+    /// each word, which favors hearings of fewer words.
+    pub familiar: Option<usize>,
     /// Cost per nat of a word's misfit after the previous word,
     /// `ln(Q(word) / P(word | previous))`, `Q` being the word-pair counts'
     /// own word frequency ([`Lexicon::misfit`]): negative (a saving) when the
@@ -88,6 +95,20 @@ impl SearchConfig {
     }
 }
 
+/// The rarity `word` pays commonness on: its `−ln P(word)`, less the last
+/// familiar word's (see [`SearchConfig::familiar`]), at least 0.
+pub fn rarity(lexicon: &Lexicon, config: &SearchConfig, word: WordId) -> f32 {
+    let surprisal = lexicon.surprisal(word);
+    match config.familiar {
+        Some(familiar) if !lexicon.is_empty() => {
+            // Word ids run in frequency order.
+            let edge = familiar.clamp(1, lexicon.len()) - 1;
+            (surprisal - lexicon.surprisal(edge as WordId)).max(0.0)
+        }
+        _ => surprisal,
+    }
+}
+
 /// What `word` costs after `previous` (none at the line's start), its sound
 /// aside: the word penalty, its commonness and its fit, floored at zero. A
 /// good fit can make a word free but not pay for it: negative costs would
@@ -98,7 +119,7 @@ pub fn word_cost(
     previous: Option<WordId>,
     word: WordId,
 ) -> f32 {
-    let mut cost = config.word_penalty + config.commonness * lexicon.surprisal(word);
+    let mut cost = config.word_penalty + config.commonness * rarity(lexicon, config, word);
     if config.bigrams(lexicon) {
         cost += config.fit * lexicon.misfit(previous, word);
     }
@@ -107,7 +128,7 @@ pub fn word_cost(
 
 /// The least [`word_cost`] over every previous word: a lower bound.
 pub fn least_word_cost(lexicon: &Lexicon, config: &SearchConfig, word: WordId) -> f32 {
-    let mut cost = config.word_penalty + config.commonness * lexicon.surprisal(word);
+    let mut cost = config.word_penalty + config.commonness * rarity(lexicon, config, word);
     if config.bigrams(lexicon) {
         cost += config.fit * lexicon.best_misfit(word);
     }
@@ -120,6 +141,7 @@ impl Default for SearchConfig {
             results: 10,
             bound: 4.0,
             commonness: 0.005,
+            familiar: None,
             fit: 0.005,
             word_penalty: 0.4,
             extra: HashMap::new(),
@@ -944,6 +966,52 @@ mod tests {
     }
 
     #[test]
+    fn familiar_words_pay_no_commonness_and_rarer_ones_pay_the_difference() {
+        let lexicon = tiny();
+        let edge = SearchConfig {
+            commonness: 0.1,
+            familiar: Some(3),
+            fit: 0.0,
+            ..SearchConfig::default()
+        };
+        let id = |w: &str| lexicon.id(w).unwrap();
+        // The lexicon keeps the frequency list's order: the, this, guy, ...
+        let last_familiar = lexicon.surprisal(2);
+        assert_eq!(lexicon.word(2), "guy");
+        assert_eq!(rarity(&lexicon, &edge, id("the")), 0.0);
+        assert_eq!(rarity(&lexicon, &edge, id("guy")), 0.0);
+        let beyond = lexicon.surprisal(id("kiss")) - last_familiar;
+        assert!(beyond > 0.0);
+        assert!((rarity(&lexicon, &edge, id("kiss")) - beyond).abs() < 1e-6);
+        assert!(
+            (word_cost(&lexicon, &edge, None, id("kiss")) - (edge.word_penalty + 0.1 * beyond))
+                .abs()
+                < 1e-6
+        );
+        let the = id("the");
+        // Off: every word pays for all its rarity, as before.
+        let off = SearchConfig {
+            familiar: None,
+            ..edge.clone()
+        };
+        assert_eq!(rarity(&lexicon, &off, the), lexicon.surprisal(the));
+        // A cutoff past the lexicon makes every word familiar.
+        let all = SearchConfig {
+            familiar: Some(1000),
+            ..edge.clone()
+        };
+        assert!((0..lexicon.len() as WordId).all(|w| rarity(&lexicon, &all, w) == 0.0));
+        for config in [&edge, &off, &all] {
+            for w in 0..lexicon.len() as WordId {
+                assert!(
+                    least_word_cost(&lexicon, config, w)
+                        <= word_cost(&lexicon, config, None, w) + 1e-6
+                );
+            }
+        }
+    }
+
+    #[test]
     fn commonness_and_fit_split_the_old_weight() {
         let lexicon = tiny_with_pairs();
         let id = |w: &str| lexicon.id(w).unwrap();
@@ -1023,7 +1091,12 @@ mod tests {
             })
             .unwrap()
         };
-        for (commonness, fit) in [(0.05, 0.05), (0.0, 0.3), (0.05, 2.0)] {
+        for (commonness, fit, familiar) in [
+            (0.05, 0.05, None),
+            (0.0, 0.3, None),
+            (0.05, 2.0, None),
+            (0.5, 0.05, Some(3)),
+        ] {
             for (input, bound) in [
                 ("K IH1 S DH AH0", 4.0),
                 ("K EY1 S DH IH1 S", 4.0),
@@ -1034,6 +1107,7 @@ mod tests {
                     results: 5,
                     bound,
                     commonness,
+                    familiar,
                     fit,
                     ..SearchConfig::default()
                 };
