@@ -15,8 +15,8 @@ use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::deform::Deformation;
 use crate::lexicon::{
-    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, read_frequencies,
-    spelled_as_letters, spelling,
+    CommonWords, Frequency, Lexicon, SpellingVariants, WordId, abbreviation, read_frequencies,
+    spelling,
 };
 use crate::phone::Ph;
 use crate::search::{
@@ -133,7 +133,7 @@ fn keeps<D: PronouncingDictionary + ?Sized>(
     word: &str,
 ) -> bool {
     common.is_none_or(|c| {
-        c.contains(word) && !(c.rejects_letter_spellings() && spelled_as_letters(dict, word))
+        c.contains(word) && !(c.rejects_letter_spellings() && abbreviation(dict, word))
     })
 }
 

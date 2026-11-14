@@ -247,8 +247,7 @@ pub fn parse_frequencies(text: &str) -> Result<Vec<Frequency>, String> {
 /// - Every word ([`Self::any`]).
 ///
 /// SCOWL and every-word lists drop single letters but "a" and "i", and
-/// words pronounced as their letters' names ("tv", "uk"; see
-/// [`spelled_as_letters`]).
+/// abbreviations ("tv", "sr"; see [`abbreviation`]).
 pub struct CommonWords {
     /// Each listed word's level; `None`: every word.
     words: Option<HashMap<String, u8>>,
@@ -344,8 +343,7 @@ impl CommonWords {
         self.max_level = level;
     }
 
-    /// Whether words pronounced as their letters' names are to go too
-    /// (see [`spelled_as_letters`]).
+    /// Whether abbreviations are to go too (see [`abbreviation`]).
     pub fn rejects_letter_spellings(&self) -> bool {
         self.no_letter_spellings
     }
@@ -377,6 +375,23 @@ impl CommonWords {
                 || (k > 0 && CLITICS.contains(&part))
         })
     }
+}
+
+/// Interjections spelled without a vowel letter.
+const VOWELLESS_WORDS: [&str; 12] = [
+    "hmm", "hm", "mm", "mmm", "shh", "sh", "psst", "brr", "pfft", "tsk", "grr", "zzz",
+];
+
+/// Whether `word` is an abbreviation: said as its letters ("tv"; see
+/// [`spelled_as_letters`]), or spelled without a vowel letter but said as
+/// the word it stands for ("sr", senior; "mr", "lbs", "blvd").
+/// Interjections such as "hmm" and "shh" aren't.
+pub fn abbreviation<D: PronouncingDictionary + ?Sized>(dict: &D, word: &str) -> bool {
+    let base = word.split('\'').next().unwrap_or(word);
+    let vowelless = base.len() > 1
+        && !base.contains(['a', 'e', 'i', 'o', 'u', 'y'])
+        && !VOWELLESS_WORDS.contains(&base);
+    vowelless || spelled_as_letters(dict, word)
 }
 
 /// Whether some pronunciation of `word` is its letters' names said in
@@ -969,6 +984,16 @@ mod tests {
         }
         for word in ["bee", "icy", "okay", "pizza", "excel", "it", "a"] {
             assert!(!spelled_as_letters(cmudict(), word), "{word}");
+        }
+    }
+
+    #[test]
+    fn abbreviations_are_told_from_words() {
+        for word in ["sr", "mr", "mrs", "lbs", "blvd", "tv", "tv's", "uk"] {
+            assert!(abbreviation(cmudict(), word), "{word}");
+        }
+        for word in ["hmm", "shh", "my", "gym", "sister", "senior", "okay"] {
+            assert!(!abbreviation(cmudict(), word), "{word}");
         }
     }
 

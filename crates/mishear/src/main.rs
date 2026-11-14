@@ -101,7 +101,8 @@ SEARCH OPTIONS
                        (names, places, days and months; no abbreviations);
                      none: every word.
                      scowl and none drop single letters but 'a' and 'i', and
-                     words pronounced as their letters ('tv', 'uk')
+                     abbreviations: words said as their letters ('tv', 'uk')
+                     or spelled without a vowel ('sr', 'mr', 'lbs')
   --scowl-level N    with --word-list scowl, SCOWL's size level kept: 10 the
                      most common words ... 80 rare ones (default 60)
   --all-words        --word-list none
