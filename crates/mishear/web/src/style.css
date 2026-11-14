@@ -169,6 +169,7 @@ details.disabled .panel-body {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  margin-bottom: 0.6rem;
 }
 .row {
   display: flex;
