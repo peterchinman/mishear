@@ -164,7 +164,7 @@ of the input. Its cost adds up three things:
   from mime-reader's vowel and consonant distance engines, on a 0–1 scale.
 - **Language-model cost.** Per word, `0.46` plus two parts, floored at zero
   (see "Commonness and fit" below):
-  - **commonness**, `0.19 × −ln P(word)` beyond the 12,000 most frequent
+  - **commonness**, `0.19 × −ln P(word)` beyond the 14,000 most frequent
     words' (`--familiar`, see "The edge of the vocabulary"), with `P` from
     wordfreq: how rare the word is;
   - **fit**, `0.215 × ln(Q(word) / P(word | previous word))`, both from
@@ -193,7 +193,7 @@ The weights below are judgment calls, picked by looking at output. They
 weren't fitted to data, so they are all flags. `sweep` loads the engine once
 and runs a grid of them. The defaults were last set on 2026-11-14, from
 settings chosen in the web page: every word in the lexicon, a vocabulary
-edge at 12,000 words with a steep rarity cost beyond it, a strong pull
+edge at 14,000 words with a steep rarity cost beyond it, a strong pull
 toward word pairs that make sense, and strong pulls away from the line's
 own words and roots.
 
@@ -205,7 +205,7 @@ earlier defaults. To reproduce them, add `--unigram --lm 0.05
 | flag | default | what it trades |
 |---|---|---|
 | `--commonness` | 0.19 | sound against how common each word is; with `--familiar`, how steep the vocabulary's edge is |
-| `--familiar` | 12000 (0: off) | the listener's vocabulary: the N most frequent words pay no commonness |
+| `--familiar` | 14000 (0: off) | the listener's vocabulary: the N most frequent words pay no commonness |
 | `--fit` | 0.215 | sound against how well each word follows the one before (0: words alone, exactly) |
 | `--lm` | – | sets `--commonness` and `--fit` both: the single weight they replaced |
 | `--word-penalty` | 0.46 | many short words against few long ones |

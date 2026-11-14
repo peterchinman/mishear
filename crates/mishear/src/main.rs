@@ -43,7 +43,7 @@ SEARCH OPTIONS
                      (default 0.19; 0 ignores frequency)
   --familiar N       the listener's vocabulary: the lexicon's N most frequent
                      words pay no commonness, rarer ones pay for how much
-                     rarer they are than the Nth (default 12000; 0 is off:
+                     rarer they are than the Nth (default 14000; 0 is off:
                      every word pays for all its rarity, which favors fewer
                      words)
   --fit F            cost per nat of a word's misfit after the one before,

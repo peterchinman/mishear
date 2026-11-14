@@ -63,7 +63,7 @@ const SEARCH_KNOBS: Knob[] = [
     min: 500,
     max: 50000,
     step: 500,
-    onValue: 10000,
+    onValue: 14000,
   },
   {
     type: 'number',

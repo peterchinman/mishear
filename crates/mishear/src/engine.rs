@@ -79,7 +79,7 @@ impl Default for MishearConfig {
                 results: 4,
                 bound: 2.0,
                 commonness: 0.19,
-                familiar: Some(12_000),
+                familiar: Some(14_000),
                 fit: 0.215,
                 word_penalty: 0.46,
                 ..SearchConfig::default()
