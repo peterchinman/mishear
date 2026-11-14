@@ -25,7 +25,7 @@ import sys
 REGIONS = {"english", "american", "british", "british_z", "variant_1"}
 CATEGORIES = {"words", "contractions", "upper", "proper-names"}
 MAX_LEVEL = 80
-FILE = re.compile(r"(.+)-([a-z]+(?:-names)?)\.(\d+)$")
+FILE = re.compile(r"(.+?)-(words|contractions|upper|proper-names|abbreviations)\.(\d+)$")
 WORD = re.compile(r"[a-z']*[a-z][a-z']*")
 
 scowl = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "scowl-2020.12.07")
