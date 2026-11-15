@@ -1122,7 +1122,7 @@ function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
     state.mode = 'mishear';
     state.text = pick.line;
     renderInput();
-    $('source').textContent = `— ${pick.poem}`;
+    $('source').textContent = `— ${pick.source}`;
     changed();
     if (!state.autoRun) run();
   };

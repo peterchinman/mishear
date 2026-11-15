@@ -1,24 +1,16 @@
-// Lines of the public-domain poems in data/echo/public, for "random line".
-// (The private corpus is never bundled.)
-const files = import.meta.glob('../../../../data/echo/public/**/*.txt', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
+// Line-sized pieces of The Great Gatsby, for "random line": see
+// data/gatsby/README.md.
+const text = Object.values(
+  import.meta.glob('../../../../data/gatsby/lines.txt', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
 
-export interface PoemLine {
-  poem: string;
+export interface SourceLine {
+  /** Where the line comes from. */
+  source: string;
   line: string;
 }
 
-export const LINES: PoemLine[] = Object.entries(files).flatMap(([path, text]) => {
-  const header = text.split('\n\n')[0] ?? '';
-  const title = /^title:\s*(.+)$/m.exec(header)?.[1] ?? path;
-  const author = /^author:\s*(.+)$/m.exec(header)?.[1] ?? '';
-  const body = text.slice(header.length);
-  return body
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.split(/\s+/).length >= 3)
-    .map((line) => ({ poem: author ? `${author}, “${title}”` : title, line }));
-});
+export const LINES: SourceLine[] = text
+  .split('\n')
+  .filter(Boolean)
+  .map((line) => ({ source: 'F. Scott Fitzgerald, The Great Gatsby', line }));
