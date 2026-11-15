@@ -26,6 +26,7 @@
           <button id="profile-rename" type="button">Rename…</button>
           <button id="profile-delete" type="button">Delete</button>
         </div>
+        <div id="profile-compare" class="profile-compare" title="Hear the line under these profiles too, side by side." hidden></div>
         <details open>
           <summary>Search</summary>
           <div class="panel-body" id="search-knobs"></div>
@@ -69,7 +70,7 @@
         <div id="error" class="error" hidden></div>
         <section id="heard-section" hidden>
           <h2>Heard</h2>
-          <p class="hint">Each line is heard on its own. Under each, the alignment shows every heard word over the phonemes it covers.</p>
+          <p id="heard-hint" class="hint"></p>
           <div id="heard-lines"></div>
         </section>
         <section id="sweep-section" hidden>

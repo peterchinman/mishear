@@ -165,7 +165,11 @@ What the page has:
   applies it; the menu marks it "(edited)" once the knobs leave its values,
   and "Save" writes them back. "Save as…" makes a new one; "Rename…" and
   "Delete" act on the chosen one. A profile saved before a knob was added
-  takes that knob's default.
+  takes that knob's default. Ticking profiles under "Show together" hears
+  each line under the current knobs and each of them, side by side (the
+  hearings and their costs, without the alignment). Profiles that share
+  lexicon options run back to back, so the worker rebuilds the lexicon as
+  few times as it can.
 
 `npm run data` symlinks CMUdict, VarCon and the generated word lists into
 `public/data`, which is gitignored, and gzips the packed word-pair counts

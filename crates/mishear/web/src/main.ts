@@ -218,6 +218,8 @@ interface State {
   sweepValues: string;
   /** The profile last applied or saved, if any (see "profiles"). */
   profile?: string;
+  /** Profiles whose hearings show beside the current knobs'. */
+  compare?: string[];
 }
 
 // Only settings changed from their defaults are saved, so a change of default
@@ -347,14 +349,8 @@ function inputLines(): string[] {
     .filter(Boolean);
 }
 
-function request(text: string): RequestDto {
-  return {
-    mode: state.mode,
-    text,
-    deformation: NO_DEFORMATION,
-    search: state.search,
-    cost: state.cost,
-  };
+function request(text: string, search: SearchDto = state.search, cost: CostDto = state.cost): RequestDto {
+  return { mode: state.mode, text, deformation: NO_DEFORMATION, search, cost };
 }
 
 // --------------------------------------------------------------- worker ----
@@ -792,6 +788,42 @@ function renderProfiles(): void {
   $<HTMLButtonElement>('profile-save').disabled = active === undefined || !edited;
   $<HTMLButtonElement>('profile-rename').disabled = active === undefined;
   $<HTMLButtonElement>('profile-delete').disabled = active === undefined;
+
+  state.compare = (state.compare ?? []).filter((name) => name in profiles);
+  const compare = $('profile-compare');
+  compare.hidden = names.length === 0;
+  compare.replaceChildren(
+    el('span', { textContent: 'Show together:' }),
+    ...names.map((name) => {
+      const box = el('input', { type: 'checkbox', checked: state.compare!.includes(name) });
+      box.onchange = () => {
+        state.compare = box.checked ? [...state.compare!, name] : state.compare!.filter((n) => n !== name);
+        changed();
+      };
+      return el('label', {}, box, ` ${name}`);
+    }),
+  );
+}
+
+/** One way to hear the lines: the current knobs, or a profile's values. */
+interface Setting {
+  label: string;
+  search: SearchDto;
+  cost: CostDto;
+  lexicon: LexiconOptions;
+}
+
+/** The current knobs, then each profile shown together with them (one
+ * the knobs already hold counts once). */
+function settings(): Setting[] {
+  const profiles = readProfiles();
+  const active = state.profile !== undefined && state.profile in profiles && holds(profiles[state.profile]) ? state.profile : undefined;
+  const out: Setting[] = [{ label: active ?? 'current knobs', search: state.search, cost: state.cost, lexicon: state.lexicon }];
+  for (const name of state.compare ?? []) {
+    if (name === active || !(name in profiles)) continue;
+    out.push({ label: name, ...fullProfile(profiles[name]) });
+  }
+  return out;
 }
 
 /** Sets the knobs to the profile's values. */
@@ -854,6 +886,7 @@ function wireProfiles(): void {
     delete profiles[old];
     writeProfiles(profiles);
     state.profile = name;
+    state.compare = (state.compare ?? []).map((n) => (n === old ? name : n));
     saveState();
     renderProfiles();
   };
@@ -898,40 +931,111 @@ async function run(): Promise<void> {
     rerun = false;
     const lines = inputLines();
     if (!lines.length) break;
-    const blocks: HTMLElement[] = [];
-    let total = 0;
-    let notice: string | undefined;
-    let failed = false;
-    showError('');
-    for (const [k, line] of lines.entries()) {
-      const what = lines.length > 1 ? `line ${k + 1} of ${lines.length}` : '';
-      setStatus(sameLexicon() ? `Hearing${what ? ` ${what}` : ''}…` : 'Rebuilding the lexicon, then hearing…', true);
-      const lexicon = structuredClone(state.lexicon);
-      const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line)) });
-      if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
-      if (rerun) break; // Stale: the input or knobs moved while it ran.
-      if (reply.type === 'error') {
-        setStatus('');
-        showError(lines.length > 1 ? `Line ${k + 1}: ${reply.message}` : reply.message);
-        failed = true;
-        break;
-      }
-      if (reply.type !== 'result') continue;
-      lexiconInfo = reply.info;
-      engineMemoryMb = reply.memoryMb;
-      notice = reply.notice ?? notice;
-      total += reply.ms + reply.rebuildMs;
-      blocks.push(lineBlock(line, reply.result, reply.ms, reply.rebuildMs, lines.length > 1));
-      // Each line shows as soon as it's heard.
-      $('heard-section').hidden = false;
-      $('heard-lines').replaceChildren(...blocks);
-    }
-    if (rerun || failed) continue;
-    renderLexiconInfo();
-    const heard = lines.length > 1 ? `Heard ${lines.length} lines in ${thousands(total)} ms` : `Heard in ${thousands(total)} ms`;
-    setStatus(notice ? `${heard}. ${notice}` : heard);
+    if (state.compare?.length) await runTogether(lines);
+    else await runAlone(lines);
   } while (rerun);
   running = false;
+}
+
+/** Hears each line under the current knobs, with its full results. */
+async function runAlone(lines: string[]): Promise<void> {
+  $('heard-hint').textContent = 'Each line is heard on its own. Under each, the alignment shows every heard word over the phonemes it covers.';
+  const blocks: HTMLElement[] = [];
+  let total = 0;
+  let notice: string | undefined;
+  showError('');
+  for (const [k, line] of lines.entries()) {
+    const what = lines.length > 1 ? `line ${k + 1} of ${lines.length}` : '';
+    setStatus(sameLexicon() ? `Hearing${what ? ` ${what}` : ''}…` : 'Rebuilding the lexicon, then hearing…', true);
+    const lexicon = structuredClone(state.lexicon);
+    const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line)) });
+    if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
+    if (rerun) return; // Stale: the input or knobs moved while it ran.
+    if (reply.type === 'error') {
+      setStatus('');
+      showError(lines.length > 1 ? `Line ${k + 1}: ${reply.message}` : reply.message);
+      return;
+    }
+    if (reply.type !== 'result') continue;
+    lexiconInfo = reply.info;
+    engineMemoryMb = reply.memoryMb;
+    notice = reply.notice ?? notice;
+    total += reply.ms + reply.rebuildMs;
+    blocks.push(lineBlock(line, reply.result, reply.ms, reply.rebuildMs, lines.length > 1));
+    // Each line shows as soon as it's heard.
+    $('heard-section').hidden = false;
+    $('heard-lines').replaceChildren(...blocks);
+  }
+  renderLexiconInfo();
+  const heard = lines.length > 1 ? `Heard ${lines.length} lines in ${thousands(total)} ms` : `Heard in ${thousands(total)} ms`;
+  setStatus(notice ? `${heard}. ${notice}` : heard);
+}
+
+/** Hears each line under the current knobs and every profile shown
+ * together, one column each. Settings sharing a lexicon run back to back,
+ * so the worker rebuilds it as few times as it can. */
+async function runTogether(lines: string[]): Promise<void> {
+  $('heard-hint').textContent = 'Each line is heard on its own, under the current knobs and each profile shown together. Hover a hearing for its sound cost.';
+  const columns = settings();
+  const cells: (ResultDto | string | null)[][] = lines.map(() => columns.map(() => null));
+  const show = () => {
+    $('heard-section').hidden = false;
+    $('heard-lines').replaceChildren(...lines.map((line, k) => togetherBlock(line, columns, cells[k], lines.length > 1)));
+  };
+  show();
+  showError('');
+  const key = (c: Setting) => JSON.stringify(c.lexicon);
+  const loaded = lastLexicon ? JSON.stringify(lastLexicon) : '';
+  const order = columns.map((_, i) => i).sort((a, b) => Number(key(columns[b]) === loaded) - Number(key(columns[a]) === loaded) || key(columns[a]).localeCompare(key(columns[b])));
+  let total = 0;
+  let done = 0;
+  for (const i of order) {
+    const column = columns[i];
+    for (const [k, line] of lines.entries()) {
+      setStatus(`Hearing ${++done} of ${lines.length * columns.length}…`, true);
+      const lexicon = structuredClone(column.lexicon);
+      const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line, column.search, column.cost)) });
+      if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
+      if (rerun) return;
+      if (reply.type === 'result') {
+        cells[k][i] = reply.result;
+        total += reply.ms + reply.rebuildMs;
+        lexiconInfo = reply.info;
+        engineMemoryMb = reply.memoryMb;
+      } else if (reply.type === 'error') {
+        cells[k][i] = reply.message;
+      }
+      show();
+    }
+  }
+  renderLexiconInfo();
+  const lineCount = lines.length > 1 ? `${lines.length} lines` : 'the line';
+  setStatus(`Heard ${lineCount} under ${columns.length} settings in ${thousands(total)} ms`);
+}
+
+/** One line's hearings under each setting, side by side. */
+function togetherBlock(line: string, columns: Setting[], cells: (ResultDto | string | null)[], several: boolean): HTMLElement {
+  const column = (c: Setting, cell: ResultDto | string | null) => {
+    const body =
+      cell === null
+        ? el('p', { className: 'hint', textContent: '…' })
+        : typeof cell === 'string'
+          ? el('p', { className: 'error', textContent: cell })
+          : el(
+              'ol',
+              {},
+              ...cell.hearings.map((h) =>
+                el('li', { title: `sound ${fmt(h.phonetic)}` }, h.text, el('span', { className: 'cost', textContent: fmt(h.cost) })),
+              ),
+            );
+    return el('div', { className: 'column' }, el('h4', { textContent: c.label }), body);
+  };
+  return el(
+    'section',
+    { className: 'heard-line' },
+    ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
+    el('div', { className: 'sweep' }, ...columns.map((c, i) => column(c, cells[i]))),
+  );
 }
 
 let engineMemoryMb = 0;
