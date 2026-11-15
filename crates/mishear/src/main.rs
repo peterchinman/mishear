@@ -86,12 +86,14 @@ SEARCH OPTIONS
                      spelling
   --vocab N          lexicon size: most frequent words (default 50000). Every
                      frequent word is in, but single letters other than 'a'
-                     and 'i'; abbreviations: words said as their letters
+                     and 'i'; two-letter words but English ones ('to',
+                     'us'); abbreviations: words said as their letters
                      ('tv', 'uk') or spelled without a vowel ('sr', 'lbs'),
                      keeping a word's reading as written ('rep', not
                      'representative'); and hand-made lists of foreign
                      words ('le', 'que', 'un'), fragments ('ve', 'ing'),
-                     clipped words ('gov', 'app') and short names ('jo')
+                     clipped words ('gov', 'app'), short names ('jo') and
+                     interjections ('um', 'hmm', 'ooh')
   --unigram          --fit 0, whatever else is given: score each word alone,
                      exactly and faster. Otherwise fit uses word-pair counts
                      from Google Books fiction (data/bigrams-en.bin; see

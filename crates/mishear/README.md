@@ -59,9 +59,12 @@ keeps out the obscure: past the familiar words, rarity costs (see "The edge
 of the vocabulary"). The lexicon leaves out only:
 
 - single letters but "a" and "I";
+- two-letter words but the English ones ("to", "of", "us", "ox", "hi", …):
+  most two-letter entries in wordfreq's list are letter names ("es"),
+  foreign words ("mi", "si") or interjections ("um", "ay");
 - words spelled without a vowel letter, which CMUdict reads as the word
-  they stand for ("sr" as "senior", "mr", "lbs"), interjections such as
-  "hmm" and "shh" aside;
+  they stand for ("sr" as "senior", "mr", "lbs"), or which are
+  interjections ("hmm");
 - pronunciations that read a word as an abbreviation: as its letters'
   names ("tv", "uk", "ok"), or as the longer word it stands for, three
   phonemes or more beyond its letters ("etc" as et cetera, "rep" as
@@ -74,9 +77,10 @@ of the vocabulary"). The lexicon leaves out only:
   - fragments of longer words: "ve", "ing", "pre", "im", "ons", "tri", …;
   - clipped words: "co", "inc", "corp", "admin", "gov", "min", "sec",
     "app", "bot", "abs", …;
-  - short names: "sam", "dan", "jo", "mac", "kai", "jen", ….
+  - short names: "sam", "dan", "jo", "mac", "kai", "jen", …;
+  - interjections and fillers: "umm", "ooh", "nah", "yay", "lol", ….
 
-  Interjections ("er", "hmm", "ooh", "aw", "nah") stay.
+  Exclamations that are ordinary words ("yeah", "hey", "wow") stay.
 
 Earlier versions filtered the lexicon by the ENABLE word list (a Scrabble
 list: no names, but "haar" and "qi") or by SCOWL's graded lists; with the

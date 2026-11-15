@@ -234,9 +234,21 @@ pub fn parse_frequencies(text: &str) -> Result<Vec<Frequency>, String> {
         .collect()
 }
 
-/// Interjections spelled without a vowel letter.
-const VOWELLESS_WORDS: [&str; 12] = [
-    "hmm", "hm", "mm", "mmm", "shh", "sh", "psst", "brr", "pfft", "tsk", "grr", "zzz",
+/// The two-letter words the lexicon admits. English has few, and most
+/// two-letter entries in wordfreq's list are letter names ("es"), foreign
+/// words ("mi", "si") or interjections ("um", "ay"), which act as free
+/// gap-fillers in hearings.
+const TWO_LETTER_WORDS: [&str; 34] = [
+    "to", "of", "in", "is", "it", "on", "be", "as", "at", "he", "by", "my", "or", "we", "an", "so",
+    "me", "if", "up", "do", "no", "us", "go", "am", "ox", "ax", "ex", "ad", "id", "ye", "lo", "ma",
+    "pa", "hi",
+];
+
+/// Interjections and fillers of three letters or more: "umm", "hmm",
+/// "ooh", "nah", "lol".
+const INTERJECTIONS: [&str; 17] = [
+    "umm", "hmm", "ahh", "ooh", "ohh", "aww", "heh", "hah", "nah", "yah", "yay", "ish", "bam",
+    "doo", "poo", "lol", "tis",
 ];
 
 /// Foreign function words and syllables, frequent in wordfreq's English
@@ -285,19 +297,27 @@ pub fn admits<D: PronouncingDictionary + ?Sized>(
 }
 
 /// Whether `word` is never a word for the lexicon, however it's said:
-/// spelled without a vowel letter, as abbreviations are ("sr", "mr", "lbs",
-/// "blvd"; interjections such as "hmm" and "shh" aside), or on one of the
-/// hand-made lists: [`FOREIGN`] words, [`FRAGMENTS`], [`CLIPPED`] words and
-/// [`SHORT_NAMES`].
+/// spelled without a vowel letter, as abbreviations and some interjections
+/// are ("sr", "lbs", "hmm"); two letters long but not one of
+/// [`TWO_LETTER_WORDS`] ("es", "mi", "um"); or on one of the hand-made
+/// lists: [`FOREIGN`] words, [`FRAGMENTS`], [`CLIPPED`] words,
+/// [`SHORT_NAMES`] and [`INTERJECTIONS`]. A word's apostrophe and what
+/// follows it don't count: "he's" is "he".
 pub fn not_a_word(word: &str) -> bool {
     let base = word.split('\'').next().unwrap_or(word);
-    let vowelless = base.len() > 1
-        && !base.contains(['a', 'e', 'i', 'o', 'u', 'y'])
-        && !VOWELLESS_WORDS.contains(&base);
+    let vowelless = base.len() > 1 && !base.contains(['a', 'e', 'i', 'o', 'u', 'y']);
+    let two_letters = base.len() == 2 && !TWO_LETTER_WORDS.contains(&base);
     vowelless
-        || [&FOREIGN[..], &FRAGMENTS, &CLIPPED, &SHORT_NAMES]
-            .iter()
-            .any(|list| list.contains(&base))
+        || two_letters
+        || [
+            &FOREIGN[..],
+            &FRAGMENTS,
+            &CLIPPED,
+            &SHORT_NAMES,
+            &INTERJECTIONS,
+        ]
+        .iter()
+        .any(|list| list.contains(&base))
 }
 
 /// Whether `pronunciation` reads `word` as an abbreviation: as its
@@ -918,11 +938,19 @@ mod tests {
         ] {
             assert!(abbreviation(cmudict(), word), "{word}");
         }
-        // Words, interjections, and abbreviations with a reading as written.
+        // Words, and abbreviations with a reading as written.
         for word in [
-            "hmm", "shh", "er", "my", "gym", "sister", "senior", "okay", "rep",
+            "my", "gym", "sister", "senior", "okay", "rep", "he's", "ma'am",
         ] {
             assert!(!abbreviation(cmudict(), word), "{word}");
+        }
+        // Interjections, letter names and foreign two-letter words are out;
+        // English two-letter words are in.
+        for word in ["hmm", "er", "um", "ay", "es", "mi", "ooh", "nah"] {
+            assert!(not_a_word(word), "{word}");
+        }
+        for word in ["to", "of", "us", "ox", "hi", "yeah", "wow"] {
+            assert!(!not_a_word(word), "{word}");
         }
     }
 
