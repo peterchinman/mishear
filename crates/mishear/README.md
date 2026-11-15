@@ -140,9 +140,9 @@ What the page has:
 
 - **Input:** a line of text, or ARPAbet phonemes heard as given (no
   novelty).
-- **Random line:** picks a line-sized piece of *The Great Gatsby* (public
-  domain) from `data/gatsby/lines.txt`: a sentence of 5 to 14 words, or a
-  clause of that length, every word in CMUdict.
+- **Random line:** picks a sentence of *The Great Gatsby* (public domain)
+  from `data/gatsby/lines.txt`: narration, not dialogue, 5 to 14 words,
+  every word in CMUdict.
   `scripts/gatsby_lines.py` regenerates it from Project Gutenberg's text.
 - **Results:** for each line of the input, heard on its own, the hearings
   (each with an ⓘ for its cost breakdown), and, in a section that folds, a

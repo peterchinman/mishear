@@ -1,9 +1,10 @@
-"""Writes data/gatsby/lines.txt (at the repository root): line-sized pieces
-of F. Scott Fitzgerald's The Great Gatsby (1925; public domain), for the web
-page's "random line". A piece is a sentence of 5 to 14 words, or, from a
-longer sentence, a clause of that length (split at commas, semicolons,
-colons and dashes); only pieces whose every word CMUdict lists are kept, so
-a random line is always heard.
+"""Writes data/gatsby/lines.txt (at the repository root): sentences of F.
+Scott Fitzgerald's The Great Gatsby (1925; public domain) for the web
+page's "random line". A sentence is kept when it is
+- not too long: 5 to 14 words;
+- pronounceable: every word in CMUdict, so a random line is always heard;
+- narration, not dialogue: it has no quotation mark and doesn't start
+  inside a quotation (tracked across a paragraph's sentences).
 
     curl -sfLO https://www.gutenberg.org/cache/epub/64317/pg64317.txt
     python3 scripts/gatsby_lines.py pg64317.txt
@@ -40,11 +41,9 @@ def words(piece: str) -> list[str]:
     return [w.strip("'").lower() for w in re.findall(r"[A-Za-z][A-Za-z']*", piece)]
 
 
-def tidy(piece: str) -> str:
-    """The piece without its quotation marks (dialogue's, which split it
-    oddly; the book writes ‘ only as one) or the punctuation around it."""
-    piece = re.sub(r"[\"“”‘]", "", piece)
-    return piece.strip(" ‘’'()[]—–-,;:.")
+def tidy(sentence: str) -> str:
+    """The sentence without its final period or the space around it."""
+    return sentence.strip().rstrip(".").strip()
 
 
 paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", text)]
@@ -54,15 +53,22 @@ pieces: list[str] = []
 for paragraph in paragraphs:
     if re.fullmatch(r"[IVX]+", paragraph):  # a chapter heading
         continue
-    for sentence in re.split(r"(?<=[.!?])[”’\")]*\s+", paragraph):
-        candidates = [sentence]
-        if len(words(sentence)) > MAX_WORDS:
-            candidates = re.split(r"[,;:—–]\s*", sentence)
-        for candidate in candidates:
-            piece = tidy(candidate)
-            w = words(piece)
-            if MIN_WORDS <= len(w) <= MAX_WORDS and all(x in pronounceable for x in w):
-                pieces.append(piece)
+    quoted = False  # inside a quotation where this sentence starts
+    for sentence in re.split(r"(?<=[.!?])(?<![A-Z]\.)\s+(?=[^a-z])", paragraph):
+        dialogue = quoted or any(mark in sentence for mark in "“”\"‘")
+        # Where the quotation stands after this sentence: open quotes past
+        # its last close.
+        last_open, last_close = sentence.rfind("“"), sentence.rfind("”")
+        if last_open > last_close:
+            quoted = True
+        elif last_close > last_open:
+            quoted = False
+        if dialogue:
+            continue
+        piece = tidy(sentence)
+        w = words(piece)
+        if MIN_WORDS <= len(w) <= MAX_WORDS and all(x in pronounceable for x in w):
+            pieces.append(piece)
 
 seen = set()
 unique = [p for p in pieces if not (p in seen or seen.add(p))]
