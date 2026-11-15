@@ -62,7 +62,7 @@ const SEARCH_KNOBS: Knob[] = [
     hint: 'How strongly common words are preferred over rare ones.',
     info: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ (all of it when “familiar words” is off): how much common words are preferred, or how steep the edge of the vocabulary is. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. 0: a rare word costs no more than “the”. With “familiar words” off and this high, hearings collapse into single long words (“recommendations”).',
     min: 0,
-    max: 0.5,
+    max: 1,
     step: 0.005,
   },
   {
@@ -72,7 +72,7 @@ const SEARCH_KNOBS: Knob[] = [
     hint: 'How much each word must make sense after the one before.',
     info: 'Cost per nat of how much less likely a word is after the one before than on its own (a saving when they go together), both measured in Google Books fiction’s word pairs: how much the hearing’s neighbouring words must make sense. 0: words alone (exact, faster, no 29 MB download). Around 0.05 it shapes hearings (“case this guy”); a word’s cost per word + rarity cost + sense never goes below zero.',
     min: 0,
-    max: 0.5,
+    max: 1,
     step: 0.005,
   },
   { type: 'number', key: 'word_penalty', label: 'cost per word', hint: 'Higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s cost per word + rarity cost + sense never goes below zero.', min: 0, max: 2, step: 0.01 },
