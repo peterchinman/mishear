@@ -143,8 +143,9 @@ What the page has:
 - **Random line:** picks from the public-domain poems in `data/echo/public`.
   The private corpus is never bundled.
 - **Results:** for each line of the input, heard on its own, the hearings
-  with their cost breakdown, and a grid aligning each heard word with the
-  phonemes it covers. A passage heard as one long line costs about the
+  (each with an ⓘ for its cost breakdown), and, in a section that folds, a
+  grid aligning each heard word with the phonemes it covers and the
+  search's statistics. A passage heard as one long line costs about the
   square of its length (the search's bound grows with the line, and every
   word position may spend all of it), so lines are heard one by one, as
   `hear` and `mishear` do on the command line; hearings don't run across a
@@ -167,7 +168,7 @@ What the page has:
   "Delete" act on the chosen one. A profile saved before a knob was added
   takes that knob's default. Ticking profiles under "Show together" hears
   each line under the current knobs and each of them, side by side (the
-  hearings and their costs, without the alignment). Profiles that share
+  hearings, with their costs behind each ⓘ, without the alignment). Profiles that share
   lexicon options run back to back, so the worker rebuilds the lexicon as
   few times as it can.
 

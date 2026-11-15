@@ -313,10 +313,25 @@ aside summary {
 .hearings .text {
   font-size: 1.2rem;
 }
-.hearings .meta {
+/* A hearing's ⓘ, and the details it shows. */
+.info-toggle {
+  padding: 0 0.2rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.info-toggle:hover,
+.info-toggle[aria-expanded='true'] {
+  color: var(--accent);
+}
+.hearing-info {
+  margin: 0.1rem 0 0.3rem;
   color: var(--muted);
   font-size: 0.82rem;
-  margin-left: 0.6rem;
   font-variant-numeric: tabular-nums;
 }
 

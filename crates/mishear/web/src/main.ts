@@ -529,6 +529,19 @@ function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement): void 
 
 // -------------------------------------------------------------- results ----
 
+/** A hearing's words, and an ⓘ that shows and hides `details` under them. */
+function hearingItem(text: string, details: string): HTMLLIElement {
+  const info = el('p', { className: 'hearing-info', textContent: details, hidden: true });
+  const button = el('button', { type: 'button', className: 'info-toggle', textContent: 'ⓘ', title: 'Details' });
+  button.setAttribute('aria-expanded', 'false');
+  button.onclick = (event) => {
+    event.stopPropagation(); // not a click on the hearing itself
+    info.hidden = !info.hidden;
+    button.setAttribute('aria-expanded', String(!info.hidden));
+  };
+  return el('li', {}, el('span', { className: 'text', textContent: text }), ' ', button, info);
+}
+
 /** One line's hearings, its stats and its alignment grid, which
  * highlights the hearing last clicked. */
 function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: number, several: boolean): HTMLElement {
@@ -538,23 +551,17 @@ function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: numbe
   const list = el('ol', { className: 'hearings' });
   list.replaceChildren(
     ...result.hearings.map((h, i) => {
-      const li = el(
-        'li',
-        { className: i === selected ? 'selected' : '' },
-        el('span', { className: 'text', textContent: h.text }),
-        el('span', {
-          className: 'meta',
-          textContent: [
-            `cost ${fmt(h.cost)}`,
-            `sound ${fmt(h.phonetic)}`,
-            ...(mishear ? [`${h.shared} same word`, `${h.related} same root`] : []),
-            ...(i > 0 ? [`${h.reused} reused`] : []),
-            ...(result.boundaries.length ? [`crosses ${result.boundaries.length - h.kept} of ${result.boundaries.length} boundaries`] : []),
-          ].join(' · '),
-          title:
-            'cost: sound + cost per word + rarity cost + sense + novelty + same-root + kept boundaries + variety of list. sound: the phonetic part alone. same root: words other than the line’s own that share a stem with one of them. reused: words an earlier hearing in the list used.',
-        }),
+      const li = hearingItem(
+        h.text,
+        [
+          `cost ${fmt(h.cost)}`,
+          `sound ${fmt(h.phonetic)}`,
+          ...(mishear ? [`${h.shared} same word`, `${h.related} same root`] : []),
+          ...(i > 0 ? [`${h.reused} reused`] : []),
+          ...(result.boundaries.length ? [`crosses ${result.boundaries.length - h.kept} of ${result.boundaries.length} boundaries`] : []),
+        ].join(' · '),
       );
+      li.classList.toggle('selected', i === selected);
       li.onclick = () => {
         selected = i;
         list.querySelectorAll('li').forEach((x, k) => x.classList.toggle('selected', k === i));
@@ -578,6 +585,7 @@ function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: numbe
     { className: 'alignment-block', open: alignmentOpen },
     el('summary', { textContent: 'Alignment' }),
     el('div', { className: 'alignment-scroll' }, grid),
+    el('p', { className: 'hint', textContent: stats.filter(Boolean).join(' · ') }),
   );
   alignment.addEventListener('toggle', () => (alignmentOpen = alignment.open));
   return el(
@@ -585,7 +593,6 @@ function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: numbe
     { className: 'heard-line' },
     ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
     list,
-    el('p', { className: 'hint', textContent: stats.filter(Boolean).join(' · ') }),
     alignment,
   );
 }
@@ -939,7 +946,6 @@ async function run(): Promise<void> {
 
 /** Hears each line under the current knobs, with its full results. */
 async function runAlone(lines: string[]): Promise<void> {
-  $('heard-hint').textContent = 'Each line is heard on its own. Under each, the alignment shows every heard word over the phonemes it covers.';
   const blocks: HTMLElement[] = [];
   let total = 0;
   let notice: string | undefined;
@@ -975,7 +981,6 @@ async function runAlone(lines: string[]): Promise<void> {
  * together, one column each. Settings sharing a lexicon run back to back,
  * so the worker rebuilds it as few times as it can. */
 async function runTogether(lines: string[]): Promise<void> {
-  $('heard-hint').textContent = 'Each line is heard on its own, under the current knobs and each profile shown together. Hover a hearing for its sound cost.';
   const columns = settings();
   const cells: (ResultDto | string | null)[][] = lines.map(() => columns.map(() => null));
   const show = () => {
@@ -1024,9 +1029,7 @@ function togetherBlock(line: string, columns: Setting[], cells: (ResultDto | str
           : el(
               'ol',
               {},
-              ...cell.hearings.map((h) =>
-                el('li', { title: `sound ${fmt(h.phonetic)}` }, h.text, el('span', { className: 'cost', textContent: fmt(h.cost) })),
-              ),
+              ...cell.hearings.map((h) => hearingItem(h.text, `cost ${fmt(h.cost)} · sound ${fmt(h.phonetic)}`)),
             );
     return el('div', { className: 'column' }, el('h4', { textContent: c.label }), body);
   };
