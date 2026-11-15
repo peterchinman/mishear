@@ -216,6 +216,8 @@ interface State {
   autoRun: boolean;
   sweepKnob: string;
   sweepValues: string;
+  /** The profile last applied or saved, if any (see "profiles"). */
+  profile?: string;
 }
 
 // Only settings changed from their defaults are saved, so a change of default
@@ -725,6 +727,148 @@ async function runSweep(): Promise<void> {
   setStatus('');
 }
 
+// ------------------------------------------------------------ profiles ----
+
+/** A named set of knob values, kept in this browser. */
+interface Profile {
+  search: SearchDto;
+  cost: CostDto;
+  lexicon: LexiconOptions;
+}
+
+const PROFILES_KEY = 'mishear-web-profiles-v1';
+
+function readProfiles(): Record<string, Profile> {
+  try {
+    return JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function writeProfiles(profiles: Record<string, Profile>): void {
+  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+}
+
+/** The knobs as they stand. */
+function currentProfile(): Profile {
+  return structuredClone({ search: state.search, cost: state.cost, lexicon: state.lexicon });
+}
+
+/** A profile over the current defaults: knobs added since it was saved
+ * take their defaults, and knobs since removed are dropped. */
+function fullProfile(p: Profile): Profile {
+  return {
+    search: { ...defaults.search, ...p.search, within: defaults.search.within },
+    cost: { ...defaults.cost, ...p.cost },
+    lexicon: { ...defaults.lexicon, ...withoutWordLists(p.lexicon ?? {}) },
+  };
+}
+
+function sameValues(a: object, b: object): boolean {
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  return [...new Set([...Object.keys(x), ...Object.keys(y)])].every((k) => (x[k] ?? null) === (y[k] ?? null));
+}
+
+/** Whether the knobs hold the profile's values. */
+function holds(p: Profile): boolean {
+  const full = fullProfile(p);
+  return sameValues(state.search, full.search) && sameValues(state.cost, full.cost) && sameValues(state.lexicon, full.lexicon);
+}
+
+/** The profile menu, marking the active profile "(edited)" once the knobs
+ * leave its values, and the buttons that apply to it. */
+function renderProfiles(): void {
+  const profiles = readProfiles();
+  if (state.profile !== undefined && !(state.profile in profiles)) state.profile = undefined;
+  const active = state.profile;
+  const edited = active !== undefined && !holds(profiles[active]);
+  const names = Object.keys(profiles).sort((a, b) => a.localeCompare(b));
+  $<HTMLSelectElement>('profile').replaceChildren(
+    el('option', { value: '', textContent: names.length ? '(no profile)' : '(no profiles yet)', selected: active === undefined }),
+    ...names.map((name) => el('option', { value: name, textContent: name === active && edited ? `${name} (edited)` : name, selected: name === active })),
+  );
+  $<HTMLButtonElement>('profile-save').disabled = active === undefined || !edited;
+  $<HTMLButtonElement>('profile-rename').disabled = active === undefined;
+  $<HTMLButtonElement>('profile-delete').disabled = active === undefined;
+}
+
+/** Sets the knobs to the profile's values. */
+function applyProfile(name: string): void {
+  const p = fullProfile(readProfiles()[name]);
+  state.search = p.search;
+  state.cost = p.cost;
+  state.lexicon = p.lexicon;
+  state.profile = name;
+  renderAll();
+  changed();
+  setStatus(`Applied “${name}”.`);
+}
+
+/** Asks for a profile name, `suggested` filled in; `null` if cancelled or
+ * declined (an existing name must be confirmed to overwrite). */
+function askName(question: string, suggested: string, unless?: string): string | null {
+  const name = prompt(question, suggested)?.trim();
+  if (!name) return null;
+  if (name !== unless && name in readProfiles() && !confirm(`Replace the profile “${name}”?`)) return null;
+  return name;
+}
+
+function wireProfiles(): void {
+  const select = $<HTMLSelectElement>('profile');
+  select.onchange = () => {
+    if (select.value) applyProfile(select.value);
+    else {
+      state.profile = undefined;
+      saveState();
+      renderProfiles();
+    }
+  };
+  $('profile-save').onclick = () => {
+    if (state.profile === undefined) return;
+    const profiles = readProfiles();
+    profiles[state.profile] = currentProfile();
+    writeProfiles(profiles);
+    renderProfiles();
+    setStatus(`Saved “${state.profile}”.`);
+  };
+  $('profile-save-as').onclick = () => {
+    const name = askName('Save these knobs as a profile named:', state.profile ? `${state.profile} 2` : '');
+    if (name === null) return;
+    const profiles = readProfiles();
+    profiles[name] = currentProfile();
+    writeProfiles(profiles);
+    state.profile = name;
+    saveState();
+    renderProfiles();
+    setStatus(`Saved “${name}”.`);
+  };
+  $('profile-rename').onclick = () => {
+    const old = state.profile;
+    if (old === undefined) return;
+    const name = askName(`Rename “${old}” to:`, old, old);
+    if (name === null || name === old) return;
+    const profiles = readProfiles();
+    profiles[name] = profiles[old];
+    delete profiles[old];
+    writeProfiles(profiles);
+    state.profile = name;
+    saveState();
+    renderProfiles();
+  };
+  $('profile-delete').onclick = () => {
+    const name = state.profile;
+    if (name === undefined || !confirm(`Delete the profile “${name}”? The knobs keep their values.`)) return;
+    const profiles = readProfiles();
+    delete profiles[name];
+    writeProfiles(profiles);
+    state.profile = undefined;
+    saveState();
+    renderProfiles();
+  };
+}
+
 // ------------------------------------------------------------- running ----
 
 let lastLexicon: LexiconOptions | null = null;
@@ -735,6 +879,7 @@ let rerun = false;
 
 function changed(): void {
   saveState();
+  renderProfiles();
   if (history.replaceState && location.hash) history.replaceState(null, '', location.pathname);
   if (state.autoRun) {
     clearTimeout(timer);
@@ -811,6 +956,7 @@ function renderInput(): void {
 
 function renderAll(): void {
   renderInput();
+  renderProfiles();
   renderKnobs('search', SEARCH_KNOBS, $('search-knobs'));
   renderKnobs('cost', COST_KNOBS, $('cost-knobs'));
   renderKnobs('lexicon', LEXICON_KNOBS, $('lexicon-knobs'));
@@ -870,6 +1016,7 @@ function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
     changed();
     if (!state.autoRun) run();
   };
+  wireProfiles();
   $('reset-all').onclick = () => {
     const keep = { text: state.text, phonemes: state.phonemes, mode: state.mode };
     state = { ...defaultState(), ...keep };
