@@ -732,7 +732,8 @@ async function runSweep(): Promise<void> {
 
 // ------------------------------------------------------------ profiles ----
 
-/** A named set of knob values, kept in this browser. */
+/** A named set of knob values, kept in this browser. How many hearings to
+ * show ("results") isn't one of them: it stays as it is. */
 interface Profile {
   search: SearchDto;
   cost: CostDto;
@@ -753,16 +754,18 @@ function writeProfiles(profiles: Record<string, Profile>): void {
   localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
 }
 
-/** The knobs as they stand. */
+/** The knobs as they stand, but "results". */
 function currentProfile(): Profile {
-  return structuredClone({ search: state.search, cost: state.cost, lexicon: state.lexicon });
+  const { results, ...search } = state.search;
+  return structuredClone({ search: search as SearchDto, cost: state.cost, lexicon: state.lexicon });
 }
 
 /** A profile over the current defaults: knobs added since it was saved
- * take their defaults, and knobs since removed are dropped. */
+ * take their defaults, and knobs since removed are dropped. "results" is
+ * always the current one, whatever an older profile saved. */
 function fullProfile(p: Profile): Profile {
   return {
-    search: { ...defaults.search, ...p.search, within: defaults.search.within },
+    search: { ...defaults.search, ...p.search, within: defaults.search.within, results: state.search.results },
     cost: { ...defaults.cost, ...p.cost },
     lexicon: { ...defaults.lexicon, ...withoutWordLists(p.lexicon ?? {}) },
   };

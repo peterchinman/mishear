@@ -161,8 +161,8 @@ What the page has:
   first line.
 - **Saving:** settings are kept in localStorage, and "Copy link" puts them in
   the URL.
-- **Profiles:** named sets of knob values (search, cost and lexicon; not the
-  line or the sweep), kept in this browser's localStorage. Choosing one
+- **Profiles:** named sets of knob values (search, cost and lexicon; not
+  "results", the line or the sweep), kept in this browser's localStorage. Choosing one
   applies it; the menu marks it "(edited)" once the knobs leave its values,
   and "Save" writes them back. "Save as…" makes a new one; "Rename…" and
   "Delete" act on the chosen one. A profile saved before a knob was added
