@@ -10,7 +10,7 @@ import type {
   ResultDto,
   SearchDto,
 } from 'mishear';
-import { LINES } from './lines';
+import { SOURCES } from './lines';
 import { sameLexicon as same, type FromWorker, type ToWorker } from './protocol';
 
 // ---------------------------------------------------------------- knobs ----
@@ -220,6 +220,8 @@ interface State {
   profile?: string;
   /** Profiles whose hearings show beside the current knobs'. */
   compare?: string[];
+  /** Where "random line" picks from: a key of SOURCES, or "either". */
+  lineSource?: string;
 }
 
 // Only settings changed from their defaults are saved, so a change of default
@@ -1161,13 +1163,28 @@ function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
     saveState();
   });
   $('run').onclick = run;
+  const sourceMenu = $<HTMLSelectElement>('line-source');
+  sourceMenu.replaceChildren(
+    ...[...Object.entries(SOURCES).map(([key, s]) => [key, s.label]), ['either', 'either']].map(([key, label]) =>
+      el('option', { value: key, textContent: label, selected: key === (state.lineSource ?? 'gatsby') }),
+    ),
+  );
+  sourceMenu.onchange = () => {
+    state.lineSource = sourceMenu.value;
+    saveState();
+  };
   $('random-line').onclick = () => {
-    const pick = LINES[Math.floor(Math.random() * LINES.length)];
+    const key = state.lineSource ?? 'gatsby';
+    // "Either": every line of every source equally likely.
+    const pool = (key in SOURCES ? [SOURCES[key]] : Object.values(SOURCES)).flatMap((s) =>
+      s.lines.map((line) => ({ line, credit: s.credit })),
+    );
+    const pick = pool[Math.floor(Math.random() * pool.length)];
     if (!pick) return;
     state.mode = 'mishear';
     state.text = pick.line;
     renderInput();
-    $('source').textContent = `— ${pick.source}`;
+    $('source').textContent = `— ${pick.credit}`;
     changed();
     if (!state.autoRun) run();
   };

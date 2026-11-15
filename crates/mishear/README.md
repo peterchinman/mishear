@@ -140,10 +140,13 @@ What the page has:
 
 - **Input:** a line of text, or ARPAbet phonemes heard as given (no
   novelty).
-- **Random line:** picks a sentence of *The Great Gatsby* (public domain)
-  from `data/gatsby/lines.txt`: narration, not dialogue, 5 to 14 words,
-  every word in CMUdict.
-  `scripts/gatsby_lines.py` regenerates it from Project Gutenberg's text.
+- **Random line:** picks, from the source in the menu beside it, a sentence
+  of *The Great Gatsby* (public domain; `data/gatsby/lines.txt`: narration,
+  not dialogue, 5 to 14 words, every word in CMUdict), a proverbial phrase
+  (from Wikipedia's "List of proverbial phrases", CC BY-SA 4.0;
+  `data/proverbs/lines.txt`, made by `scripts/proverb_lines.py`), or either.
+  `scripts/gatsby_lines.py` regenerates the Gatsby lines from Project
+  Gutenberg's text.
 - **Results:** for each line of the input, heard on its own, the hearings
   (each with an ⓘ for its cost breakdown), and, in a section that folds, a
   grid aligning each heard word with the phonemes it covers and the
