@@ -1021,7 +1021,7 @@ async function runTogether(lines: string[]): Promise<void> {
   setStatus(`Heard ${lineCount} under ${columns.length} settings in ${thousands(total)} ms`);
 }
 
-/** One line's hearings under each setting, side by side. */
+/** One line's hearings under each setting, one under another. */
 function togetherBlock(line: string, columns: Setting[], cells: (ResultDto | string | null)[], several: boolean): HTMLElement {
   const column = (c: Setting, cell: ResultDto | string | null) => {
     const body =
@@ -1031,16 +1031,16 @@ function togetherBlock(line: string, columns: Setting[], cells: (ResultDto | str
           ? el('p', { className: 'error', textContent: cell })
           : el(
               'ol',
-              {},
+              { className: 'hearings' },
               ...cell.hearings.map((h) => hearingItem(h.text, `cost ${fmt(h.cost)} · sound ${fmt(h.phonetic)}`)),
             );
-    return el('div', { className: 'column' }, el('h4', { textContent: c.label }), body);
+    return el('div', { className: 'together-row' }, el('h4', { textContent: c.label }), body);
   };
   return el(
     'section',
     { className: 'heard-line' },
     ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
-    el('div', { className: 'sweep' }, ...columns.map((c, i) => column(c, cells[i]))),
+    el('div', { className: 'together' }, ...columns.map((c, i) => column(c, cells[i]))),
   );
 }
 

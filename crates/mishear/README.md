@@ -168,7 +168,7 @@ What the page has:
   "Delete" act on the chosen one. A profile saved before a knob was added
   takes that knob's default. Ticking profiles under "Show together" (under
   the Hear button) hears each line under the current knobs and each of
-  them, side by side (the hearings, with their costs behind each ⓘ,
+  them, one under another (the hearings, with their costs behind each ⓘ,
   without the alignment). Profiles that share lexicon options run back to
   back, so the worker rebuilds the lexicon as few times as it can.
 

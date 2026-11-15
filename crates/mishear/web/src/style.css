@@ -389,6 +389,18 @@ aside summary {
   border-color: var(--accent);
 }
 
+/* "Show together": each setting's hearings, one setting under another. */
+.together-row + .together-row {
+  margin-top: 0.6rem;
+}
+.together-row h4 {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.together-row .hearings li {
+  cursor: default;
+}
 .sweep {
   display: flex;
   gap: 1.25rem;
