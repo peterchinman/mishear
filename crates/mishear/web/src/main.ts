@@ -750,8 +750,34 @@ function readProfiles(): Record<string, Profile> {
   }
 }
 
-function writeProfiles(profiles: Record<string, Profile>): void {
+/** Writes the profiles, and their order (see [`profileOrder`]). */
+function writeProfiles(profiles: Record<string, Profile>, order: string[] = profileOrder(profiles)): void {
   localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+  writeOrder(order.filter((name) => name in profiles));
+}
+
+const PROFILE_ORDER_KEY = 'mishear-web-profile-order-v1';
+
+/** The profiles' names in the order chosen for them: the stored order, then
+ * any profile it doesn't name yet, alphabetically. (Kept apart from the
+ * profiles, since an object's keys don't keep every order: "2" sorts
+ * first.) */
+function profileOrder(profiles: Record<string, Profile> = readProfiles()): string[] {
+  let stored: string[] = [];
+  try {
+    stored = JSON.parse(localStorage.getItem(PROFILE_ORDER_KEY) ?? '[]');
+  } catch {
+    /* none */
+  }
+  const known = stored.filter((name, i) => name in profiles && stored.indexOf(name) === i);
+  const rest = Object.keys(profiles)
+    .filter((name) => !known.includes(name))
+    .sort((a, b) => a.localeCompare(b));
+  return [...known, ...rest];
+}
+
+function writeOrder(order: string[]): void {
+  localStorage.setItem(PROFILE_ORDER_KEY, JSON.stringify(order));
 }
 
 /** The knobs as they stand, but "results". */
@@ -790,13 +816,15 @@ function renderProfiles(): void {
   if (state.profile !== undefined && !(state.profile in profiles)) state.profile = undefined;
   const active = state.profile;
   const edited = active !== undefined && !holds(profiles[active]);
-  const names = Object.keys(profiles).sort((a, b) => a.localeCompare(b));
+  const names = profileOrder(profiles);
   $<HTMLSelectElement>('profile').replaceChildren(
     el('option', { value: '', textContent: names.length ? '(no profile)' : '(no profiles yet)', selected: active === undefined }),
     ...names.map((name) => el('option', { value: name, textContent: name === active && edited ? `${name} (edited)` : name, selected: name === active })),
   );
   $<HTMLButtonElement>('profile-save').disabled = active === undefined || !edited;
   $<HTMLButtonElement>('profile-rename').disabled = active === undefined;
+  $<HTMLButtonElement>('profile-up').disabled = active === undefined || names.indexOf(active) <= 0;
+  $<HTMLButtonElement>('profile-down').disabled = active === undefined || names.indexOf(active) >= names.length - 1;
   $<HTMLButtonElement>('profile-delete').disabled = active === undefined;
 
   state.compare = (state.compare ?? []).filter((name) => name in profiles);
@@ -829,8 +857,8 @@ function settings(): Setting[] {
   const profiles = readProfiles();
   const active = state.profile !== undefined && state.profile in profiles && holds(profiles[state.profile]) ? state.profile : undefined;
   const out: Setting[] = [{ label: active ?? 'current knobs', search: state.search, cost: state.cost, lexicon: state.lexicon }];
-  for (const name of state.compare ?? []) {
-    if (name === active || !(name in profiles)) continue;
+  for (const name of profileOrder(profiles)) {
+    if (name === active || !(state.compare ?? []).includes(name)) continue;
     out.push({ label: name, ...fullProfile(profiles[name]) });
   }
   return out;
@@ -892,14 +920,31 @@ function wireProfiles(): void {
     const name = askName(`Rename “${old}” to:`, old, old);
     if (name === null || name === old) return;
     const profiles = readProfiles();
+    const order = profileOrder(profiles).map((n) => (n === old ? name : n));
     profiles[name] = profiles[old];
     delete profiles[old];
-    writeProfiles(profiles);
+    writeProfiles(profiles, order);
     state.profile = name;
     state.compare = (state.compare ?? []).map((n) => (n === old ? name : n));
     saveState();
     renderProfiles();
   };
+  // Moves the chosen profile one place up (-1) or down (1).
+  const move = (by: number) => {
+    const name = state.profile;
+    if (name === undefined) return;
+    const order = profileOrder();
+    const at = order.indexOf(name);
+    const to = at + by;
+    if (at < 0 || to < 0 || to >= order.length) return;
+    [order[at], order[to]] = [order[to], order[at]];
+    writeOrder(order);
+    // Profiles shown together are heard in this order too.
+    if (state.compare?.length) changed();
+    else renderProfiles();
+  };
+  $('profile-up').onclick = () => move(-1);
+  $('profile-down').onclick = () => move(1);
   $('profile-delete').onclick = () => {
     const name = state.profile;
     if (name === undefined || !confirm(`Delete the profile “${name}”? The knobs keep their values.`)) return;

@@ -166,8 +166,9 @@ What the page has:
 - **Profiles:** named sets of knob values (search, cost and lexicon; not
   "results", the line or the sweep), kept in this browser's localStorage. Choosing one
   applies it; the menu marks it "(edited)" once the knobs leave its values,
-  and "Save" writes them back. "Save as…" makes a new one; "Rename…" and
-  "Delete" act on the chosen one. A profile saved before a knob was added
+  and "Save" writes them back. "Save as…" makes a new one; "↑" and "↓"
+  move the chosen one in the order the menu, "Show together" and its
+  results follow; "Rename…" and "Delete" act on the chosen one. A profile saved before a knob was added
   takes that knob's default. Ticking profiles under "Show together" (under
   the Hear button) hears each line under the current knobs and each of
   them, one under another (the hearings, with their costs behind each ⓘ,
