@@ -97,7 +97,7 @@ SEARCH OPTIONS
   --unigram          --fit 0, whatever else is given: score each word alone,
                      exactly and faster. Otherwise fit uses word-pair counts
                      from Google Books fiction (data/bigrams-en.bin; see
-                     scripts/google_bigrams.sh), or is 0 if that file is
+                     Setup in README.md), or is 0 if that file is
                      missing.
   --bigrams          require the word-pair counts (an error without them)
   --beam N           with bigrams, partial hearings kept per position: wider
@@ -402,12 +402,12 @@ fn engine_with(o: &Options, vocab: usize, all_pronunciations: bool) -> Result<En
             engine.lexicon.load_bigrams(&path, o.bigram_prior)?;
         } else if o.bigrams_required {
             return Err(format!(
-                "{}: no word-pair counts (run scripts/google_bigrams.sh)",
+                "{}: no word-pair counts (see Setup in README.md)",
                 path.display()
             ));
         } else {
             eprintln!(
-                "note: no word-pair counts at {}: scoring words alone (see scripts/google_bigrams.sh)",
+                "note: no word-pair counts at {}: scoring words alone (see Setup in README.md)",
                 path.display()
             );
         }

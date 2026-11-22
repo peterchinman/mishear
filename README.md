@@ -37,20 +37,26 @@ Cargo pins the upstream Git revision in `Cargo.toml` and records it in
 ## Setup
 
 The repository ships CMUdict and VarCon with their licenses under `data/`.
-The word-frequency list and packed word-pair counts are generated in the
-same directory and gitignored.
+The word-frequency list and packed word-pair counts are gitignored.
 
 ```sh
 # Word frequencies (wordfreq, data CC BY-SA 4.0)
 python3 -m venv /tmp/wfenv && /tmp/wfenv/bin/pip install wordfreq==3.1.1
 /tmp/wfenv/bin/python -I scripts/wordfreq_list.py 100000
 
-# Word-pair counts for the bigram model (without them, words are scored
-# alone): streams Google Books' English Fiction 2-grams (~30 GB, not stored,
-# ~16 min), keeps pairs of lexicon words, and packs them into
-# data/bigrams-en.bin (45 MB; 29 MB gzipped). Needs ~1 GB of temporary space.
-scripts/google_bigrams.sh
+# Download and verify the published word-pair model (~34 MB).
+scripts/download_bigrams.sh
+
+# Unpack it for the CLI. The web app reads the gzip directly.
+gzip -dk data/bigrams-en.bin.gz
 ```
+
+To rebuild the model, run `scripts/google_bigrams.sh` locally. It streams
+about 30 GB of Google Books English Fiction 2-grams and writes
+`data/bigrams-en.bin`. Compress it with
+`gzip -n -9 -c data/bigrams-en.bin > data/bigrams-en.bin.gz`, publish the
+gzip under a new release tag, and update the tag and SHA-256 in
+`scripts/download_bigrams.sh`.
 
 Hearings may use every word in the vocabulary (the most frequent words
 CMUdict can pronounce, `--vocab`), brands, names and places included, and
@@ -128,11 +134,10 @@ needs `wasm-pack` and the data from Setup.
 
 **Demo:** <https://peterchinman.github.io/mishear/>. The workflow
 `.github/workflows/mishear-pages.yml` builds it on pushes to
-`main` that touch the engine, web app, or data pipeline. The data is generated in CI, not
-committed: the wordfreq list, and the Google counts, whose summed form is
-cached between runs. The page's footer credits the data. `MISHEAR_BASE`
-sets the path the build is served from (`/mishear/` there, `/`
-locally).
+`main` that touch the engine, web app, or data pipeline. It generates the
+wordfreq list and downloads and verifies the pinned word-pair model.
+The page's footer credits the data. `MISHEAR_BASE` sets the path the build
+is served from (`/mishear/` there, `/` locally).
 
 ```sh
 cd web
@@ -188,9 +193,10 @@ What the page has:
   without the alignment). Profiles that share lexicon options run back to
   back, so the worker rebuilds the lexicon as few times as it can.
 
-`npm run data` symlinks CMUdict, VarCon and the generated word lists into
-`public/data`, which is gitignored, and gzips the packed word-pair counts
-there; the page unzips them as they arrive. A build
+`npm run data` links CMUdict, VarCon, the word-frequency list, and the
+verified gzip into `public/data`. When the local `data/bigrams-en.bin`
+exists, it compresses and uses that model. The page unzips the counts as
+they arrive. A build
 copies them into `dist/`. That copy includes the wordfreq list, which is CC
 BY-SA 4.0, so a hosted build has to carry that license's attribution. It
 also includes the Google Books word-pair counts (`bigrams-en.bin.gz`, CC BY

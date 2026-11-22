@@ -107,7 +107,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
         memoryMb: memory ? memory.buffer.byteLength / 1e6 : 0,
         notice:
           message.request.search.fit > 0 && bigrams === 'missing'
-            ? 'No word-pair counts (run scripts/google_bigrams.sh, then npm run data in web/): scoring words alone.'
+            ? 'No word-pair counts (run scripts/download_bigrams.sh, then npm run data in web/): scoring words alone.'
             : undefined,
       });
     }
