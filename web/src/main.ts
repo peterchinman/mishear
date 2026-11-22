@@ -10,6 +10,7 @@ import type {
   ResultDto,
   SearchDto,
 } from 'mishear';
+import defaultProfiles from './default-profiles.json';
 import { SOURCES } from './lines';
 import { sameLexicon as same, type FromWorker, type ToWorker } from './protocol';
 
@@ -737,18 +738,20 @@ async function runSweep(): Promise<void> {
 /** A named set of knob values, kept in this browser. How many hearings to
  * show ("results") isn't one of them: it stays as it is. */
 interface Profile {
-  search: SearchDto;
-  cost: CostDto;
-  lexicon: LexiconOptions;
+  search: Partial<Omit<SearchDto, 'familiar'>> & { familiar?: number | null };
+  cost: Partial<Omit<CostDto, 'swap'>> & { swap?: number | null };
+  lexicon: Partial<LexiconOptions>;
 }
 
+type ProfileSettings = Pick<State, 'search' | 'cost' | 'lexicon'>;
 const PROFILES_KEY = 'mishear-web-profiles-v1';
+const DEFAULT_PROFILES_KEY = 'mishear-web-default-profiles-v1';
 
 function readProfiles(): Record<string, Profile> {
   try {
-    return JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}') ?? {};
+    return Object.assign(Object.create(null), JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}'));
   } catch {
-    return {};
+    return Object.create(null);
   }
 }
 
@@ -782,21 +785,57 @@ function writeOrder(order: string[]): void {
   localStorage.setItem(PROFILE_ORDER_KEY, JSON.stringify(order));
 }
 
-/** The knobs as they stand, but "results". */
-function currentProfile(): Profile {
-  const { results, ...search } = state.search;
-  return structuredClone({ search: search as SearchDto, cost: state.cost, lexicon: state.lexicon });
+/** Add the bundled profiles once, preserving existing names and order. */
+function seedDefaultProfiles(): void {
+  if (localStorage.getItem(DEFAULT_PROFILES_KEY)) return;
+  const profiles = readProfiles();
+  const order = profileOrder(profiles);
+  for (const { name, ...profile } of defaultProfiles) {
+    if (name in profiles) continue;
+    profiles[name] = profile;
+    order.push(name);
+  }
+  writeProfiles(profiles, order);
+  localStorage.setItem(DEFAULT_PROFILES_KEY, '1');
+}
+
+/** Store the profile knobs. A null preserves an explicit "off". */
+function savedProfile({ search, cost, lexicon }: ProfileSettings): Profile {
+  const { results, within, familiar, ...knobs } = search;
+  return {
+    search: { ...knobs, familiar: familiar ?? null },
+    cost: { ...cost, swap: cost.swap ?? null },
+    lexicon: { ...lexicon },
+  };
 }
 
 /** A profile over the current defaults: knobs added since it was saved
- * take their defaults, and knobs since removed are dropped. "results" is
- * always the current one, whatever an older profile saved. */
-function fullProfile(p: Profile): Profile {
+ * take their defaults. "results" is always the current one. */
+function fullProfile(p: Profile): ProfileSettings {
+  const { familiar = defaults.search.familiar, ...search } = p.search;
+  const { swap = defaults.cost.swap, ...cost } = p.cost;
   return {
-    search: { ...defaults.search, ...p.search, within: defaults.search.within, results: state.search.results },
-    cost: { ...defaults.cost, ...p.cost },
+    search: { ...defaults.search, ...search, familiar: familiar ?? undefined, within: defaults.search.within, results: state.search.results },
+    cost: { ...defaults.cost, ...cost, swap: swap ?? undefined },
     lexicon: { ...defaults.lexicon, ...withoutWordLists(p.lexicon ?? {}) },
   };
+}
+
+function exportProfiles(): void {
+  const profiles = readProfiles();
+  const exported = profileOrder(profiles).map((name) => ({
+    name,
+    ...savedProfile(fullProfile(profiles[name])),
+  }));
+  if (!exported.length) return;
+  const blob = new Blob([JSON.stringify(exported, null, 2) + '\n'], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = el('a', { href: url, download: 'mishear-profiles.json' });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus(`Exported ${exported.length} ${exported.length === 1 ? 'profile' : 'profiles'}.`);
 }
 
 function sameValues(a: object, b: object): boolean {
@@ -828,6 +867,7 @@ function renderProfiles(): void {
   $<HTMLButtonElement>('profile-up').disabled = active === undefined || names.indexOf(active) <= 0;
   $<HTMLButtonElement>('profile-down').disabled = active === undefined || names.indexOf(active) >= names.length - 1;
   $<HTMLButtonElement>('profile-delete').disabled = active === undefined;
+  $<HTMLButtonElement>('profile-export').disabled = names.length === 0;
 
   state.compare = (state.compare ?? []).filter((name) => name in profiles);
   const compare = $('profile-compare');
@@ -846,11 +886,8 @@ function renderProfiles(): void {
 }
 
 /** One way to hear the lines: the current knobs, or a profile's values. */
-interface Setting {
+interface Setting extends ProfileSettings {
   label: string;
-  search: SearchDto;
-  cost: CostDto;
-  lexicon: LexiconOptions;
 }
 
 /** The current knobs, then each profile shown together with them (one
@@ -900,7 +937,7 @@ function wireProfiles(): void {
   $('profile-save').onclick = () => {
     if (state.profile === undefined) return;
     const profiles = readProfiles();
-    profiles[state.profile] = currentProfile();
+    profiles[state.profile] = savedProfile(state);
     writeProfiles(profiles);
     renderProfiles();
     setStatus(`Saved “${state.profile}”.`);
@@ -909,7 +946,7 @@ function wireProfiles(): void {
     const name = askName('Save these knobs as a profile named:', state.profile ? `${state.profile} 2` : '');
     if (name === null) return;
     const profiles = readProfiles();
-    profiles[name] = currentProfile();
+    profiles[name] = savedProfile(state);
     writeProfiles(profiles);
     state.profile = name;
     saveState();
@@ -947,6 +984,7 @@ function wireProfiles(): void {
   };
   $('profile-up').onclick = () => move(-1);
   $('profile-down').onclick = () => move(1);
+  $('profile-export').onclick = exportProfiles;
   $('profile-delete').onclick = () => {
     const name = state.profile;
     if (name === undefined || !confirm(`Delete the profile “${name}”? The knobs keep their values.`)) return;
@@ -1134,6 +1172,7 @@ function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
   lexiconInfo = m.info;
   state = loadState();
   lastLexicon = clean(m.lexicon);
+  seedDefaultProfiles();
   renderAll();
   renderLexiconInfo();
   setStatus(`Loaded in ${thousands(m.loadMs)} ms`);

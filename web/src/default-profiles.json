@@ -1,0 +1,162 @@
+[
+  {
+    "name": "base",
+    "search": {
+      "commonness": 0.19,
+      "familiar": 14000,
+      "fit": 0.215,
+      "word_penalty": 0.46,
+      "shortlist": 30,
+      "beam": 100,
+      "distinct_sounds": true,
+      "novelty": 0.6,
+      "function_share": 0.2,
+      "root": 0.85,
+      "crossing": 0.4,
+      "variety": 0.55,
+      "max_bound": 30
+    },
+    "cost": {
+      "vowel_substitution": 1,
+      "consonant_substitution": 1,
+      "stressed_vowel_indel": 1,
+      "unstressed_vowel_indel": 0.5,
+      "consonant_indel": 0.6,
+      "stress_mismatch": 0,
+      "swap": null
+    },
+    "lexicon": {
+      "vocabulary": 50000,
+      "all_pronunciations": true,
+      "bigram_prior": 100000
+    }
+  },
+  {
+    "name": "blood-borne",
+    "search": {
+      "commonness": 0.44,
+      "familiar": 16500,
+      "fit": 0.9,
+      "word_penalty": 0.31,
+      "shortlist": 30,
+      "beam": 100,
+      "distinct_sounds": true,
+      "novelty": 0.6,
+      "function_share": 0.2,
+      "root": 0.85,
+      "crossing": 0.4,
+      "variety": 0.55,
+      "max_bound": 30
+    },
+    "cost": {
+      "vowel_substitution": 1,
+      "consonant_substitution": 1,
+      "stressed_vowel_indel": 1,
+      "unstressed_vowel_indel": 0.2,
+      "consonant_indel": 0,
+      "stress_mismatch": 0,
+      "swap": null
+    },
+    "lexicon": {
+      "vocabulary": 50000,
+      "all_pronunciations": true,
+      "bigram_prior": 100000
+    }
+  },
+  {
+    "name": "loose-vowels",
+    "search": {
+      "commonness": 0.845,
+      "familiar": 14000,
+      "fit": 0.625,
+      "word_penalty": 1.31,
+      "shortlist": 30,
+      "beam": 100,
+      "distinct_sounds": true,
+      "novelty": 0.6,
+      "function_share": 0.2,
+      "root": 0.85,
+      "crossing": 0,
+      "variety": 0.55,
+      "max_bound": 30
+    },
+    "cost": {
+      "vowel_substitution": 0.1,
+      "consonant_substitution": 1.5,
+      "stressed_vowel_indel": 0.2,
+      "unstressed_vowel_indel": 0,
+      "consonant_indel": 2.15,
+      "stress_mismatch": 0,
+      "swap": null
+    },
+    "lexicon": {
+      "vocabulary": 50000,
+      "all_pronunciations": true,
+      "bigram_prior": 100000
+    }
+  },
+  {
+    "name": "man-of-few-words",
+    "search": {
+      "commonness": 0,
+      "familiar": 500,
+      "fit": 0,
+      "word_penalty": 2,
+      "shortlist": 30,
+      "beam": 100,
+      "distinct_sounds": true,
+      "novelty": 0.6,
+      "function_share": 0.1,
+      "root": 0.85,
+      "crossing": 0.4,
+      "variety": 0.55,
+      "max_bound": 30
+    },
+    "cost": {
+      "vowel_substitution": 1,
+      "consonant_substitution": 1,
+      "stressed_vowel_indel": 1,
+      "unstressed_vowel_indel": 0.5,
+      "consonant_indel": 0.6,
+      "stress_mismatch": 0,
+      "swap": null
+    },
+    "lexicon": {
+      "vocabulary": 50000,
+      "all_pronunciations": true,
+      "bigram_prior": 100000
+    }
+  },
+  {
+    "name": "break-it-down",
+    "search": {
+      "commonness": 0.845,
+      "familiar": 10000,
+      "fit": 0,
+      "word_penalty": 0,
+      "shortlist": 30,
+      "beam": 100,
+      "distinct_sounds": true,
+      "novelty": 2.9,
+      "function_share": 0.1,
+      "root": 0,
+      "crossing": 0.25,
+      "variety": 0.55,
+      "max_bound": 30
+    },
+    "cost": {
+      "vowel_substitution": 3,
+      "consonant_substitution": 2.1,
+      "stressed_vowel_indel": 3,
+      "unstressed_vowel_indel": 3,
+      "consonant_indel": 2.45,
+      "stress_mismatch": 0,
+      "swap": null
+    },
+    "lexicon": {
+      "vocabulary": 50000,
+      "all_pronunciations": true,
+      "bigram_prior": 100000
+    }
+  }
+]

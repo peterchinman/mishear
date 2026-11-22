@@ -179,8 +179,11 @@ What the page has:
   and "Save" writes them back. "Save as…" makes a new one; "↑" and "↓"
   move the chosen one in the order the menu, "Show together" and its
   results follow; "Rename…" and "Delete" act on the chosen one. A profile saved before a knob was added
-  takes that knob's default. Ticking profiles under "Show together" (under
-  the Hear button) hears each line under the current knobs and each of
+  takes that knob's default. Mishear adds missing built-in profiles at the
+  end of the menu on first load with this feature. "Export profiles"
+  downloads the saved names and settings in menu order as JSON. Ticking
+  profiles under "Show together" (under the Hear button) hears each line
+  under the current knobs and each of
   them, one under another (the hearings, with their costs behind each ⓘ,
   without the alignment). Profiles that share lexicon options run back to
   back, so the worker rebuilds the lexicon as few times as it can.
