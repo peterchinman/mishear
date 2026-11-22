@@ -142,7 +142,8 @@ What the page has:
   novelty).
 - **Random line:** picks, from the source in the menu beside it, a sentence
   of *The Great Gatsby* (public domain; `data/gatsby/lines.txt`: narration,
-  not dialogue, 5 to 14 words, every word in CMUdict), a proverbial phrase
+  not dialogue, 5 to 14 words, every word readable, derived words such as
+  "Gatsby's" included), a proverbial phrase
   (from Wikipedia's "List of proverbial phrases", CC BY-SA 4.0;
   `data/proverbs/lines.txt`, made by `scripts/proverb_lines.py`), or either.
   `scripts/gatsby_lines.py` regenerates the Gatsby lines from Project

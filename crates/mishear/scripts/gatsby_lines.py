@@ -2,12 +2,17 @@
 Scott Fitzgerald's The Great Gatsby (1925; public domain) for the web
 page's "random line". A sentence is kept when it is
 - not too long: 5 to 14 words;
-- pronounceable: every word in CMUdict, so a random line is always heard;
+- readable: every word pronounced by CMUdict or derived from it by
+  mime-reader's rules ("Gatsby's", "pointlessly"), as the page reads a
+  line, so a random line is always heard (examples/readable_lines.rs);
 - narration, not dialogue: it has no quotation mark and doesn't start
   inside a quotation (tracked across a paragraph's sentences).
 
     curl -sfLO https://www.gutenberg.org/cache/epub/64317/pg64317.txt
     python3 scripts/gatsby_lines.py pg64317.txt
+
+(When gutenberg.org is down, its mirror has the same ebook:
+https://gutenberg.pglaf.org/6/4/3/1/64317/64317-0.txt.)
 
 The text is Project Gutenberg's ebook #64317, its header, license and
 contents left out.
@@ -15,6 +20,7 @@ contents left out.
 
 import pathlib
 import re
+import subprocess
 import sys
 
 MIN_WORDS, MAX_WORDS = 5, 14
@@ -29,21 +35,16 @@ text = text.split("*** END OF THE PROJECT GUTENBERG EBOOK")[0]
 # epigraph.
 text = re.split(r"\n\s+I\n\n", text, maxsplit=1)[1]
 
-pronounceable = set()
-for line in (root / "data" / "CMUdict" / "cmudict-0.7b").read_text(encoding="latin-1").splitlines():
-    if not line.startswith(";;;"):
-        pronounceable.add(re.sub(r"\(\d+\)$", "", line.split("  ", 1)[0]).lower())
-
-
 def words(piece: str) -> list[str]:
-    """The piece's words, as CMUdict spells them."""
+    """The piece's words, to count them."""
     piece = piece.replace("’", "'").replace("‘", "'")
     return [w.strip("'").lower() for w in re.findall(r"[A-Za-z][A-Za-z']*", piece)]
 
 
 def tidy(sentence: str) -> str:
-    """The sentence without its final period or the space around it."""
-    return sentence.strip().rstrip(".").strip()
+    """The sentence without its final period, a list's leading "*" (Gatsby's
+    boyhood schedule) or the space around it."""
+    return sentence.strip().lstrip("* ").rstrip(".").strip()
 
 
 paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", text)]
@@ -66,12 +67,23 @@ for paragraph in paragraphs:
         if dialogue:
             continue
         piece = tidy(sentence)
-        w = words(piece)
-        if MIN_WORDS <= len(w) <= MAX_WORDS and all(x in pronounceable for x in w):
+        if MIN_WORDS <= len(words(piece)) <= MAX_WORDS:
             pieces.append(piece)
 
 seen = set()
 unique = [p for p in pieces if not (p in seen or seen.add(p))]
+# Keep the sentences mishear can read, in the book's order.
+readable = set(
+    subprocess.run(
+        ["cargo", "run", "-q", "--release", "-p", "mishear", "--example", "readable_lines"],
+        input="".join(f"{p}\n" for p in unique),
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=root,
+    ).stdout.splitlines()
+)
+unique = [p for p in unique if p in readable]
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text("".join(f"{p}\n" for p in unique), encoding="utf-8")
 print(f"wrote {len(unique)} lines to {out}")
