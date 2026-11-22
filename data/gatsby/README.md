@@ -9,5 +9,5 @@ the final period. There are 365.
 
 The novel is in the public domain (in the United States since 2021). The
 text is Project Gutenberg's ebook #64317, without its header, license or
-contents; `crates/mishear/scripts/gatsby_lines.py` regenerates the file
+contents; `scripts/gatsby_lines.py` regenerates the file
 from it.

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mishear</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <header>
+      <h1>mishear</h1>
+      <p class="tagline">Hear other words in a line's sounds.</p>
+      <p id="status" class="status" role="status">Loading…</p>
+    </header>
+    <main>
+      <aside id="controls">
+        <div class="panel-actions">
+          <button id="reset-all" type="button">Reset every knob</button>
+          <button id="copy-link" type="button">Copy link to these settings</button>
+        </div>
+        <div class="profiles" title="Named sets of knob values, kept in this browser.">
+          <label for="profile">Profile</label>
+          <select id="profile"></select>
+          <button id="profile-save" type="button" title="Save the knobs into this profile">Save</button>
+          <button id="profile-save-as" type="button" title="Save the knobs as a new profile">Save as…</button>
+          <button id="profile-up" type="button" title="Move this profile up">↑</button>
+          <button id="profile-down" type="button" title="Move this profile down">↓</button>
+          <button id="profile-rename" type="button">Rename…</button>
+          <button id="profile-delete" type="button">Delete</button>
+        </div>
+        <details open>
+          <summary>Search</summary>
+          <div class="panel-body" id="search-knobs"></div>
+        </details>
+        <details>
+          <summary>Cost</summary>
+          <div class="panel-body" id="cost-knobs"></div>
+        </details>
+        <details>
+          <summary>Lexicon</summary>
+          <div class="panel-body">
+            <div id="lexicon-knobs"></div>
+            <p id="lexicon-info" class="hint"></p>
+          </div>
+        </details>
+        <details>
+          <summary>Sweep</summary>
+          <div class="panel-body">
+            <p class="hint">Run the (first) line once per value of one knob, everything else fixed.</p>
+            <label class="row">knob <select id="sweep-knob"></select></label>
+            <label class="row">values <input id="sweep-values" type="text" /></label>
+            <button id="sweep-run" type="button">Run sweep</button>
+          </div>
+        </details>
+      </aside>
+
+      <section id="workspace">
+        <div class="input-bar">
+          <div class="mode" role="radiogroup" aria-label="Input">
+            <label><input type="radio" name="mode" value="mishear" checked /> text</label>
+            <label><input type="radio" name="mode" value="phonemes" /> ARPAbet phonemes</label>
+          </div>
+          <textarea id="text" rows="3" spellcheck="false"></textarea>
+          <div class="input-actions">
+            <button id="run" type="button" class="primary">Hear</button>
+            <button id="random-line" type="button">Random line</button>
+            <label class="line-source">from <select id="line-source" aria-label="Random line source"></select></label>
+            <label><input id="auto-run" type="checkbox" /> run as I type</label>
+            <span id="source" class="hint"></span>
+          </div>
+          <div id="profile-compare" class="profile-compare" title="Hear the line under these profiles too, side by side." hidden></div>
+        </div>
+        <div id="error" class="error" hidden></div>
+        <section id="heard-section" hidden>
+          <h2>Heard</h2>
+          <div id="heard-lines"></div>
+        </section>
+        <section id="sweep-section" hidden>
+          <h2 id="sweep-title">Sweep</h2>
+          <div id="sweep" class="sweep"></div>
+        </section>
+      </section>
+    </main>
+    <footer class="credits">
+      <p>
+        <a href="https://github.com/peterchinman/mishear">mishear</a> is built on
+        <a href="https://github.com/peterchinman/mime-reader">mime-reader</a>.
+        It runs entirely in your browser.
+      </p>
+      <p>
+        Data: the <a href="http://www.speech.cs.cmu.edu/cgi-bin/cmudict">CMU Pronouncing Dictionary</a>
+        (© Carnegie Mellon University, BSD-style license, <a href="data/cmudict-LICENSE.txt">included</a>);
+        word frequencies from <a href="https://github.com/rspeer/wordfreq">wordfreq</a> by Robyn Speer
+        (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; the derived list,
+        <a href="data/wordfreq-en.tsv">wordfreq-en.tsv</a>, is under the same license);
+        word pairs from the <a href="https://books.google.com/ngrams">Google Books Ngram</a> English Fiction
+        2-grams (<a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>), counted and packed;
+        spelling variants from
+        <a href="http://wordlist.aspell.net/">VarCon</a> (© Kevin Atkinson and others, permissive license,
+        <a href="data/varcon-LICENSE.txt">included</a>); lines of F. Scott Fitzgerald’s <i>The Great Gatsby</i> (1925, public domain); and proverbial
+        phrases from Wikipedia’s <a href="https://en.wikipedia.org/wiki/List_of_proverbial_phrases">List of
+        proverbial phrases</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).
+      </p>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

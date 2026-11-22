@@ -1,4 +1,4 @@
-# Builds the mishear web demo (crates/mishear/web) and publishes it to GitHub
+# Builds the mishear web demo (web/) and publishes it to GitHub
 # Pages. Its data is generated here rather than committed: the word-frequency
 # list (wordfreq, CC BY-SA 4.0) and the word-pair counts (Google Books Ngram,
 # CC BY 3.0). Streaming Google's 2-grams takes about 20 minutes, so their
@@ -7,9 +7,11 @@ name: mishear demo
 
 on:
   push:
-    branches: [peter/mishear]
+    branches: [main]
     paths:
-      - crates/mishear/**
+      - web/**
+      - scripts/**
+      - examples/**
       - src/**
       - data/CMUdict/**
       - data/VarCon/**
@@ -17,6 +19,7 @@ on:
       - data/proverbs/**
       - Cargo.toml
       - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/mishear-pages.yml
   workflow_dispatch:
 
@@ -36,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -49,34 +52,34 @@ jobs:
       - name: Word frequencies (wordfreq, CC BY-SA 4.0)
         run: |
           python -m pip install wordfreq==3.1.1
-          python -I crates/mishear/scripts/wordfreq_list.py 100000
+          python -I scripts/wordfreq_list.py 100000
 
       - name: Restore the summed Google counts
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/google-all.tsv
-          key: google-fiction-${{ hashFiles('crates/mishear/examples/google_bigrams.rs', 'crates/mishear/data/wordfreq-en.tsv') }}
+          key: google-fiction-${{ hashFiles('examples/google_bigrams.rs', 'data/wordfreq-en.tsv') }}
       - name: Word-pair counts (Google Books Ngram, CC BY 3.0)
         env:
           GOOGLE_COUNTS: ${{ runner.temp }}/google-all.tsv
-        run: crates/mishear/scripts/google_bigrams.sh
+        run: scripts/google_bigrams.sh
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Build the page
-        working-directory: crates/mishear/web
+        working-directory: web
         env:
           MISHEAR_BASE: /${{ github.event.repository.name }}/
         run: |
-          wasm-pack build .. --target web --out-dir web/pkg
+          wasm-pack build .. --target web --out-dir web/pkg -- --locked
           npm ci
           npm run data
           npx tsc --noEmit
           npx vite build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: crates/mishear/web/dist
+          path: web/dist
 
   deploy:
     needs: build

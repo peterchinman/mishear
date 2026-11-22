@@ -1,0 +1,35 @@
+#!/bin/sh
+# Builds data/bigrams-en.bin, the word-pair counts the search uses by
+# default, from the Google Books Ngram English Fiction 2-grams (2020, CC BY
+# 3.0): streams its 47 files (about 30 GB, never stored; about 16 minutes at
+# 40 MB/s) through examples/google_bigrams.rs, which keeps lowercased pairs
+# of the frequency list's words summed over the years, then packs the pairs
+# whose words can be in the lexicon (examples/pack_bigrams.rs). Needs about
+# 1 GB of temporary space. Extra arguments go to the packer (--keep N).
+#
+# GOOGLE_COUNTS=path keeps the summed counts there (about 500 MB of text)
+# and, when the file already exists, packs it without streaming again.
+set -eu
+cd "$(dirname "$0")/.."
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+counts=${GOOGLE_COUNTS:-$tmp/google-all.tsv}
+cargo build --locked --release --example google_bigrams --example pack_bigrams
+if [ ! -s "$counts" ]; then
+  index=https://storage.googleapis.com/books/ngrams/books/20200217/eng-fiction/eng-fiction-2-ngrams_exports.html
+  curl -sS --fail "$index" > "$tmp/index"
+  grep -oE 'http[^"]+/2-[0-9]+-of-[0-9]+\.gz' "$tmp/index" > "$tmp/urls"
+  echo "$(wc -l < "$tmp/urls") files"
+  for u in $(cat "$tmp/urls"); do
+    # A file cut short would leave its words undercounted: note it, and don't pack.
+    { curl -sS --fail --retry 5 "https://${u#*://}" | gunzip -c; } || touch "$tmp/failed"
+    echo "$(date +%T) $(basename "$u")" >&2
+  done | cargo run --locked --quiet --release --example google_bigrams -- --out "$tmp/google"
+  if [ -e "$tmp/failed" ]; then
+    echo "a download failed: not packing (run again)" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$counts")"
+  mv "$tmp/google-all.tsv" "$counts"
+fi
+cargo run --locked --quiet --release --example pack_bigrams -- "$counts" data/bigrams-en.bin "$@"

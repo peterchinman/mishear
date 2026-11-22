@@ -1,0 +1,5 @@
+/target/
+/data/wordfreq-en.tsv
+/data/bigrams-*
+/data/echo/private/
+.DS_Store

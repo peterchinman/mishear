@@ -10,5 +10,5 @@ a friend indeed"; of "a/b" the first is kept). There are 690.
 The phrases are traditional sayings; the list is Wikipedia's, under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and this
 file, adapted from it, is shared under the same license. Fetched on
-2026-11-14; `crates/mishear/scripts/proverb_lines.py` regenerates it from the
+2026-11-14; `scripts/proverb_lines.py` regenerates it from the
 page's wikitext.

@@ -7,5 +7,5 @@ it to treat *neighbour's* and *neighbor's* as the same word.
 
 Derived from VarCon (`varcon/varcon.txt` in https://github.com/en-wl/wordlist,
 part of SCOWL, http://wordlist.aspell.net/) on 2026-11-14 by
-`crates/mishear/scripts/varcon_map.py`. VarCon's copyright and permission
+`scripts/varcon_map.py`. VarCon's copyright and permission
 notices are in [LICENSE](LICENSE).
