@@ -1,8 +1,6 @@
-# Builds the mishear web demo (web/) and publishes it to GitHub
-# Pages. Its data is generated here rather than committed: the word-frequency
-# list (wordfreq, CC BY-SA 4.0) and the word-pair counts (Google Books Ngram,
-# CC BY 3.0). Streaming Google's 2-grams takes about 20 minutes, so their
-# summed counts are cached; packing them reruns every time.
+# Builds the mishear web demo (web/) and publishes it to GitHub Pages.
+# The build generates the word-frequency list and verifies the packed
+# word-pair model downloaded from the pinned GitHub release.
 name: mishear demo
 
 on:
@@ -54,15 +52,8 @@ jobs:
           python -m pip install wordfreq==3.1.1
           python -I scripts/wordfreq_list.py 100000
 
-      - name: Restore the summed Google counts
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/google-all.tsv
-          key: google-fiction-${{ hashFiles('examples/google_bigrams.rs', 'data/wordfreq-en.tsv') }}
-      - name: Word-pair counts (Google Books Ngram, CC BY 3.0)
-        env:
-          GOOGLE_COUNTS: ${{ runner.temp }}/google-all.tsv
-        run: scripts/google_bigrams.sh
+      - name: Download and verify the word-pair model
+        run: scripts/download_bigrams.sh
 
       - uses: actions/setup-node@v4
         with:
