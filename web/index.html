@@ -1,108 +1,191 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="pink light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>mishear</title>
+    <script id="theme-bootstrap">
+      // Apply the saved theme before the first paint.
+      (() => {
+        let palette = 'pink', mode;
+        try {
+          if (localStorage.getItem('palette') === 'blue') palette = 'blue';
+          mode = localStorage.getItem('colorMode');
+        } catch { /* Use the system setting when storage is unavailable. */ }
+        const dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        const root = document.documentElement;
+        root.classList.remove('pink', 'blue', 'light', 'dark');
+        root.classList.add(palette, dark ? 'dark' : 'light');
+        root.style.colorScheme = dark ? 'dark' : 'light';
+        root.style.backgroundColor = palette === 'blue'
+          ? (dark ? '#0F1436' : '#E0E1F7') : (dark ? '#25141B' : '#F7EBE4');
+      })();
+    </script>
+    <title>Mishearing Engine</title>
+    <link rel="preload" href="/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/unifrakturmaguntia.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/theme.css" />
+    <link rel="stylesheet" href="/src/fonts.css" />
+    <link rel="stylesheet" href="/src/style.css" />
     <link rel="icon" href="data:," />
   </head>
   <body>
-    <header>
-      <h1>mishear</h1>
-      <p class="tagline">Hear other words in a line's sounds.</p>
-      <p id="status" class="status" role="status">Loading…</p>
+    <!-- Phosphor icons are distributed under phosphor-LICENSE.txt. -->
+    <header class="site-header">
+      <h1>Mishearing Engine</h1>
+      <button class="quiet icon-button" type="button" popovertarget="site-info" title="About Mishearing Engine" aria-label="About Mishearing Engine">
+        <svg viewBox="0 0 256 256" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z" />
+        </svg>
+      </button>
     </header>
     <main>
-      <aside id="controls">
-        <div class="panel-actions">
-          <button id="reset-all" type="button">Reset every knob</button>
-          <button id="copy-link" type="button">Copy link to these settings</button>
-        </div>
-        <div class="profiles" title="Named sets of knob values, kept in this browser.">
-          <label for="profile">Profile</label>
-          <select id="profile"></select>
-          <button id="profile-save" type="button" title="Save the knobs into this profile">Save</button>
-          <button id="profile-save-as" type="button" title="Save the knobs as a new profile">Save as…</button>
-          <button id="profile-up" type="button" title="Move this profile up">↑</button>
-          <button id="profile-down" type="button" title="Move this profile down">↓</button>
-          <button id="profile-rename" type="button">Rename…</button>
-          <button id="profile-delete" type="button">Delete</button>
-          <button id="profile-export" type="button" title="Download all saved profiles as JSON" disabled>Export profiles</button>
-        </div>
-        <details open>
-          <summary>Search</summary>
-          <div class="panel-body" id="search-knobs"></div>
-        </details>
-        <details>
-          <summary>Cost</summary>
-          <div class="panel-body" id="cost-knobs"></div>
-        </details>
-        <details>
-          <summary>Lexicon</summary>
-          <div class="panel-body">
-            <div id="lexicon-knobs"></div>
-            <p id="lexicon-info" class="hint"></p>
-          </div>
-        </details>
-        <details>
-          <summary>Sweep</summary>
-          <div class="panel-body">
-            <p class="hint">Run the (first) line once per value of one knob, everything else fixed.</p>
-            <label class="row">knob <select id="sweep-knob"></select></label>
-            <label class="row">values <input id="sweep-values" type="text" /></label>
-            <button id="sweep-run" type="button">Run sweep</button>
-          </div>
-        </details>
-      </aside>
-
-      <section id="workspace">
+      <section id="workspace" aria-label="Mishear a line">
         <div class="input-bar">
-          <div class="mode" role="radiogroup" aria-label="Input">
-            <label><input type="radio" name="mode" value="mishear" checked /> text</label>
-            <label><input type="radio" name="mode" value="phonemes" /> ARPAbet phonemes</label>
+          <div class="line-input">
+            <textarea id="text" rows="1" aria-label="Line to mishear" placeholder="Loading..." spellcheck="false" disabled></textarea>
           </div>
-          <textarea id="text" rows="3" spellcheck="false"></textarea>
-          <div class="input-actions">
-            <button id="run" type="button" class="primary">Hear</button>
-            <button id="random-line" type="button">Random line</button>
-            <label class="line-source">from <select id="line-source" aria-label="Random line source"></select></label>
-            <label><input id="auto-run" type="checkbox" /> run as I type</label>
-            <span id="source" class="hint"></span>
+          <div class="input-controls">
+            <div class="profile-picker">
+              <label for="profile">Profile</label>
+              <select id="profile" disabled></select>
+              <button id="advanced" class="quiet" type="button" aria-controls="controls" aria-expanded="false">Advanced</button>
+            </div>
+            <div class="random-line-picker">
+              <button id="random-line" type="button" disabled>Random line</button>
+              <div class="line-source">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 6 L8 10 L12 6" />
+                </svg>
+                <select id="line-source" aria-label="Random line source" title="Random line source" disabled>
+                  <option value="gatsby">Gatsby</option>
+                  <option value="proverbs">proverbs</option>
+                </select>
+              </div>
+            </div>
           </div>
-          <div id="profile-compare" class="profile-compare" title="Hear the line under these profiles too, side by side." hidden></div>
         </div>
-        <div id="error" class="error" hidden></div>
-        <section id="heard-section" hidden>
-          <h2>Heard</h2>
-          <div id="heard-lines"></div>
-        </section>
-        <section id="sweep-section" hidden>
-          <h2 id="sweep-title">Sweep</h2>
-          <div id="sweep" class="sweep"></div>
+        <p id="engine-status" class="status sr-only" role="status">Loading…</p>
+        <section id="heard-section" aria-label="Mishearing result" hidden>
+          <div class="result-card">
+            <div class="result-actions">
+              <button id="copy-result" class="icon-button" type="button" title="Copy misheard text" aria-label="Copy misheard text" disabled>
+                <svg viewBox="0 0 256 256" width="18" height="18" fill="currentColor" aria-hidden="true">
+                  <path d="M184,64H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H184a8,8,0,0,0,8-8V72A8,8,0,0,0,184,64Zm-8,144H48V80H176ZM224,40V184a8,8,0,0,1-16,0V48H72a8,8,0,0,1,0-16H216A8,8,0,0,1,224,40Z" />
+                </svg>
+                <span class="copied-mark" aria-hidden="true">✓</span>
+              </button>
+              <button id="cycle-line" class="icon-button" type="button" title="Cycle line" aria-label="Cycle line" disabled>
+                <span aria-hidden="true">↻</span>
+              </button>
+            </div>
+            <p id="announcement" class="sr-only" role="status"></p>
+            <div id="heard-words" hidden></div>
+            <p id="status" class="status" role="status" hidden></p>
+            <p id="error" class="error" role="alert" hidden></p>
+            <div id="copy-fallback" hidden>
+              <label for="copy-fallback-text" class="hint">Select and copy this text manually.</label>
+              <textarea id="copy-fallback-text" rows="2" readonly></textarea>
+              <button id="close-copy-fallback" class="quiet" type="button">Done</button>
+            </div>
+          </div>
+          <p id="generation-time" class="hint" hidden></p>
+          <details id="alignment-block" class="alignment-block section-toggle" open hidden>
+            <summary>Alignment</summary>
+            <div class="alignment-scroll scroll-area" tabindex="0" role="region" aria-label="Sound alignment">
+              <div id="alignment" class="alignment"></div>
+            </div>
+          </details>
         </section>
       </section>
+
+      <aside id="controls" aria-labelledby="advanced-title" hidden>
+        <div class="controls-header">
+          <h2 id="advanced-title">Advanced settings</h2>
+          <button id="close-advanced" class="quiet" type="button">Done</button>
+        </div>
+        <div id="controls-scroll" class="scroll-area">
+          <div class="profile-picker">
+            <label for="advanced-profile">Profile</label>
+            <select id="advanced-profile" disabled></select>
+          </div>
+          <div class="panel-actions">
+            <button id="reset-all" type="button">Reset all</button>
+            <button id="copy-link" class="icon-button" type="button" title="Copy link to these settings" aria-label="Copy link to these settings">
+              <svg viewBox="0 0 256 256" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <path d="M240,88.23a54.43,54.43,0,0,1-16,37L189.25,160a54.27,54.27,0,0,1-38.63,16h-.05A54.63,54.63,0,0,1,96,119.84a8,8,0,0,1,16,.45A38.62,38.62,0,0,0,150.58,160h0a38.39,38.39,0,0,0,27.31-11.31l34.75-34.75a38.63,38.63,0,0,0-54.63-54.63l-11,11A8,8,0,0,1,135.7,59l11-11A54.65,54.65,0,0,1,224,48,54.86,54.86,0,0,1,240,88.23ZM109,185.66l-11,11A38.41,38.41,0,0,1,70.6,208h0a38.63,38.63,0,0,1-27.29-65.94L78,107.31A38.63,38.63,0,0,1,144,135.71a8,8,0,0,0,16,.45A54.86,54.86,0,0,0,144,96a54.65,54.65,0,0,0-77.27,0L32,130.75A54.62,54.62,0,0,0,70.56,224h0a54.28,54.28,0,0,0,38.64-16l11-11A8,8,0,0,0,109,185.66Z" />
+              </svg>
+            </button>
+          </div>
+          <div class="profiles" aria-label="Profile management">
+            <button id="profile-save" type="button" title="Save the knobs into this profile">Save</button>
+            <button id="profile-save-as" type="button" title="Save the knobs as a new profile">Save as…</button>
+            <button id="profile-rename" type="button">Rename…</button>
+            <button id="profile-delete" type="button">Delete</button>
+          </div>
+          <p id="settings-status" class="hint" role="status"></p>
+          <details class="section-toggle" open>
+            <summary>Search</summary>
+            <div class="panel-body" id="search-knobs"></div>
+          </details>
+          <details class="section-toggle">
+            <summary>Phonetic costs</summary>
+            <div class="panel-body" id="cost-knobs"></div>
+          </details>
+        </div>
+      </aside>
     </main>
-    <footer class="credits">
+    <footer class="site-footer">
+      <div class="theme-toggles" role="group" aria-label="Theme">
+        <div class="theme-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c4 3-4 6 0 9s-4 6 0 9" /></svg>
+          <label class="switch-container">
+            <input type="checkbox" id="pink-blue" aria-label="Cool palette" />
+            <span class="slider"></span>
+          </label>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0" /></svg>
+        </div>
+        <div class="theme-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /></svg>
+          <label class="switch-container">
+            <input type="checkbox" id="light-dark" aria-label="Dark mode" />
+            <span class="slider"></span>
+          </label>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+        </div>
+      </div>
+    </footer>
+    <div id="site-info" class="credits" popover role="dialog" aria-labelledby="info-title">
+      <div class="info-header">
+        <h2 id="info-title">About Mishearing Engine</h2>
+        <button class="quiet icon-button" type="button" popovertarget="site-info" popovertargetaction="hide" title="Close" aria-label="Close About dialog" autofocus>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6 L18 18 M18 6 L6 18" />
+          </svg>
+        </button>
+      </div>
       <p>
-        <a href="https://github.com/peterchinman/mishear">mishear</a> is built on
-        <a href="https://github.com/peterchinman/mime-reader">mime-reader</a>.
+        <a href="https://github.com/peterchinman/mishear">Mishearing Engine</a> was made by <a href="https://peterchinman.com">Peter Chinman</a>.
+        It was built using his library <a href="https://github.com/peterchinman/mime-reader">mime-reader</a>.
         It runs entirely in your browser.
       </p>
-      <p>
-        Data: the <a href="http://www.speech.cs.cmu.edu/cgi-bin/cmudict">CMU Pronouncing Dictionary</a>
-        (© Carnegie Mellon University, BSD-style license, <a href="data/cmudict-LICENSE.txt">included</a>);
-        word frequencies from <a href="https://github.com/rspeer/wordfreq">wordfreq</a> by Robyn Speer
-        (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; the derived list,
-        <a href="data/wordfreq-en.tsv">wordfreq-en.tsv</a>, is under the same license);
-        word pairs from the <a href="https://books.google.com/ngrams">Google Books Ngram</a> English Fiction
-        2-grams (<a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>), counted and packed;
-        spelling variants from
-        <a href="http://wordlist.aspell.net/">VarCon</a> (© Kevin Atkinson and others, permissive license,
-        <a href="data/varcon-LICENSE.txt">included</a>); lines of F. Scott Fitzgerald’s <i>The Great Gatsby</i> (1925, public domain); and proverbial
-        phrases from Wikipedia’s <a href="https://en.wikipedia.org/wiki/List_of_proverbial_phrases">List of
-        proverbial phrases</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).
-      </p>
-    </footer>
+      <details class="data-sources">
+        <summary>Data sources</summary>
+        <p>
+          The <a href="http://www.speech.cs.cmu.edu/cgi-bin/cmudict">CMU Pronouncing Dictionary</a>
+          (© Carnegie Mellon University, BSD-style license, <a href="data/cmudict-LICENSE.txt">included</a>);
+          word frequencies from <a href="https://github.com/rspeer/wordfreq">wordfreq</a> by Robyn Speer
+          (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; the derived list,
+          <a href="data/wordfreq-en.tsv">wordfreq-en.tsv</a>, is under the same license);
+          word pairs from the <a href="https://books.google.com/ngrams">Google Books Ngram</a> English Fiction
+          2-grams (<a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>), counted and packed;
+          spelling variants from
+          <a href="http://wordlist.aspell.net/">VarCon</a> (© Kevin Atkinson and others, permissive license,
+          <a href="data/varcon-LICENSE.txt">included</a>); lines of F. Scott Fitzgerald’s <i>The Great Gatsby</i> (1925, public domain); and proverbial
+          phrases from Wikipedia’s <a href="https://en.wikipedia.org/wiki/List_of_proverbial_phrases">List of
+          proverbial phrases</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).
+        </p>
+      </details>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

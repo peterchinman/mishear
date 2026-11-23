@@ -127,9 +127,8 @@ line separates a poem file's metadata from its text.
 
 ## Web app
 
-`web/` is a page that exposes every search, cost and lexicon knob. It hears
-lines as spoken: deformations (accents, vowel moves) are on the command line
-only. The engine is compiled to WebAssembly and runs in a Web Worker. It
+`web/` hears text as spoken. The command line also supports deformations
+such as accents and vowel moves. The engine is compiled to WebAssembly and runs in a Web Worker. It
 needs `wasm-pack` and the data from Setup.
 
 **Demo:** <https://peterchinman.github.io/mishear/>. The workflow
@@ -147,51 +146,25 @@ npm run dev     # builds the wasm, links the data into public/data, starts Vite
 npm run build   # the same, into dist/
 ```
 
-What the page has:
+Type or paste a line of text and the page searches automatically after a short
+pause. **Random line** draws from *The Great Gatsby* or proverbs. Use its
+chevron to choose a collection.
 
-- **Input:** a line of text, or ARPAbet phonemes heard as given (no
-  novelty).
-- **Random line:** picks, from the source in the menu beside it, a sentence
-  of *The Great Gatsby* (public domain; `data/gatsby/lines.txt`: narration,
-  not dialogue, 5 to 14 words, every word readable, derived words such as
-  "Gatsby's" included), a proverbial phrase
-  (from Wikipedia's "List of proverbial phrases", CC BY-SA 4.0;
-  `data/proverbs/lines.txt`, made by `scripts/proverb_lines.py`), or either.
-  `scripts/gatsby_lines.py` regenerates the Gatsby lines from Project
-  Gutenberg's text.
-- **Results:** for each line of the input, heard on its own, the hearings
-  (each with an ⓘ for its cost breakdown), and, in a section that folds, a
-  grid aligning each heard word with the phonemes it covers and the
-  search's statistics. A passage heard as one long line costs about the
-  square of its length (the search's bound grows with the line, and every
-  word position may spend all of it), so lines are heard one by one, as
-  `hear` and `mishear` do on the command line; hearings don't run across a
-  line break.
-- **Search, cost and lexicon panels:** every field of `SearchConfig`,
-  `CostConfig` and the lexicon options but the cost bound (the page always
-  asks for the top N). Defaults come from the Rust side. Changing the
-  lexicon rebuilds it in the worker. Some knobs are named for what they do
-  rather than as their flags: "rarity cost" is `--commonness`, "sense"
-  `--fit`, "cost per word" `--word-penalty`, "variety of list" `--variety`.
-  Each knob has a short description and, behind its ⓘ, a technical one.
-- **Sweep:** the CLI `sweep` for any numeric search or cost knob, on the
-  first line.
-- **Saving:** settings are kept in localStorage, and "Copy link" puts them in
-  the URL.
-- **Profiles:** named sets of knob values (search, cost and lexicon; not
-  "results", the line or the sweep), kept in this browser's localStorage. Choosing one
-  applies it; the menu marks it "(edited)" once the knobs leave its values,
-  and "Save" writes them back. "Save as…" makes a new one; "↑" and "↓"
-  move the chosen one in the order the menu, "Show together" and its
-  results follow; "Rename…" and "Delete" act on the chosen one. A profile saved before a knob was added
-  takes that knob's default. Mishear adds missing built-in profiles at the
-  end of the menu on first load with this feature. "Export profiles"
-  downloads the saved names and settings in menu order as JSON. Ticking
-  profiles under "Show together" (under the Hear button) hears each line
-  under the current knobs and each of
-  them, one under another (the hearings, with their costs behind each ⓘ,
-  without the alignment). Profiles that share lexicon options run back to
-  back, so the worker rebuilds the lexicon as few times as it can.
+The app displays one mishearing at a time. **Cycle line** loads several
+ranked alternatives and advances through them. Select a word in the result
+to search again with that spelling and pronunciation excluded from
+overlapping sound spans. Other words and their boundaries can change.
+Repeated clicks in the same part of the line keep earlier exclusions
+until you select a separate span or cycle the line. The alignment chart
+shows the original words, their sounds, and the current result. For long
+passages, the app searches shorter phrases and joins them into one result.
+
+Mishearing Engine starts with the **base** profile. Choose a different **Profile**
+below the input or at the top of **Advanced**. Built-in profiles are read-only,
+and **Save as…** keeps your adjustments in a custom profile. **Advanced**
+opens the search and phonetic cost settings along with profile management.
+The web app uses a 100,000-word vocabulary limit and all eligible pronunciations. Settings and
+profiles are stored in the browser. **Copy link** shares the current settings.
 
 `npm run data` links CMUdict, VarCon, the word-frequency list, and the
 verified gzip into `public/data`. When the local `data/bigrams-en.bin`

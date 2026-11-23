@@ -108,6 +108,8 @@ pub struct Heard {
     pub words: Vec<String>,
     /// The (deformed) input span each word covers.
     pub spans: Vec<std::ops::Range<usize>>,
+    /// The pronunciation trie node selected for each word.
+    pub pronunciations: Vec<u32>,
     pub cost: f32,
     pub phonetic: f32,
     /// How many of its words the original contains.
@@ -534,6 +536,7 @@ impl Engine {
                     .map(|&w| self.lexicon.word(w).to_string())
                     .collect(),
                 spans: m.spans.clone(),
+                pronunciations: m.pronunciations.clone(),
                 cost: m.cost,
                 phonetic: m.phonetic,
                 shared: m.words.iter().filter(|w| originals.contains(w)).count(),

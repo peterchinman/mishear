@@ -9,23 +9,7 @@ const raw = import.meta.glob(['../../data/gatsby/lines.txt', '../../data/proverb
 const read = (dir: string): string[] =>
   (Object.entries(raw).find(([path]) => path.includes(`/data/${dir}/`))?.[1] ?? '').split('\n').filter(Boolean);
 
-export interface LineSource {
-  /** What the source is called in the menu. */
-  label: string;
-  /** Shown under the line once it's picked. */
-  credit: string;
-  lines: string[];
-}
-
-export const SOURCES: Record<string, LineSource> = {
-  gatsby: {
-    label: 'Gatsby',
-    credit: 'F. Scott Fitzgerald, The Great Gatsby',
-    lines: read('gatsby'),
-  },
-  proverbs: {
-    label: 'proverbs',
-    credit: 'a proverbial phrase',
-    lines: read('proverbs'),
-  },
+export const SOURCES: Record<string, string[]> = {
+  gatsby: read('gatsby'),
+  proverbs: read('proverbs'),
 };

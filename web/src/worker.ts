@@ -1,27 +1,27 @@
-// Hosts the engine off the main thread: a search can take a second, and
-// rebuilding the lexicon a few.
-import init, { MishearApp, defaults, type LexiconOptions } from 'mishear';
-import { sameLexicon, type FromWorker, type ToWorker } from './protocol';
+// Build the lexicon and run searches off the main thread.
+import init, { MishearApp, defaults, type LexiconOptions, type RequestDto } from 'mishear';
+import type { FromWorker, LineHearing, LineResult, ToWorker } from './protocol';
 
 const post = (message: FromWorker) => self.postMessage(message);
 
 let app: MishearApp | null = null;
-let lexicon: LexiconOptions | null = null;
 let data = '';
 let bigrams: 'unloaded' | 'loaded' | 'missing' = 'unloaded';
-let memory: WebAssembly.Memory | null = null;
+const LEXICON_OPTIONS: LexiconOptions = {
+  vocabulary: 100_000,
+  all_pronunciations: true,
+  bigram_prior: 100_000,
+};
 
 /** Word-pair counts are big: fetched when first needed, packed and gzipped
  * (else as text). Without them the engine scores words alone. */
 async function ensureBigrams(): Promise<void> {
   if (bigrams !== 'unloaded' || !app) return;
-  post({ type: 'status', message: 'Fetching word-pair counts (once)…' });
   const bytes = (await fetchGzipped(data + 'bigrams-en.bin.gz')) ?? (await fetchBytes(data + 'bigrams-en.tsv'));
   if (bytes === undefined) {
     bigrams = 'missing';
     return;
   }
-  post({ type: 'status', message: 'Loading word-pair counts…' });
   app.loadBigrams(bytes);
   bigrams = 'loaded';
 }
@@ -50,13 +50,10 @@ async function fetchText(url: string, required: boolean): Promise<string | undef
   return undefined;
 }
 
-async function start(overrides: Partial<LexiconOptions>): Promise<void> {
-  const t0 = performance.now();
+async function start(): Promise<void> {
   post({ type: 'status', message: 'Loading the engine…' });
-  memory = (await init()).memory;
-  const options: LexiconOptions = { ...defaults().lexicon, ...overrides };
+  await init();
   data = import.meta.env.BASE_URL + 'data/';
-  post({ type: 'status', message: 'Fetching CMUdict and word frequencies…' });
   const [dict, frequencies, variants] = await Promise.all([
     fetch(data + 'cmudict-0.7b').then((r) => {
       if (!r.ok) throw new Error(`${data}cmudict-0.7b: HTTP ${r.status} (run \`npm run data\`)`);
@@ -66,51 +63,73 @@ async function start(overrides: Partial<LexiconOptions>): Promise<void> {
     fetchText(data + 'varcon-to-american.tsv', false),
   ]);
   post({ type: 'status', message: 'Building the lexicon…' });
-  app = new MishearApp(new Uint8Array(dict), frequencies ?? '', undefined, options);
+  app = new MishearApp(new Uint8Array(dict), frequencies ?? '', undefined, LEXICON_OPTIONS);
   if (variants !== undefined) app.setSpellingVariants(variants);
-  lexicon = options;
-  post({
-    type: 'ready',
-    defaults: defaults(),
-    info: app.lexiconInfo(),
-    lexicon: options,
-    loadMs: performance.now() - t0,
-  });
+  const { search, cost } = defaults();
+  post({ type: 'ready', defaults: { search, cost } });
+}
+
+/** Search long passages in short phrases so each phrase has its own cost bound. */
+function runLine(engine: MishearApp, request: RequestDto): LineResult {
+  const tokens = request.text.split(/\s+/).filter(Boolean);
+  const phraseSize = 12;
+  if (request.mode !== 'mishear' || tokens.length <= phraseSize) return engine.run(request);
+
+  const line: LineResult = { words: [], input: [], boundaries: [], hearings: [] };
+  const phrases: LineHearing[][] = [];
+  for (let start = 0; start < tokens.length;) {
+    let end = Math.min(start + phraseSize, tokens.length);
+    if (end < tokens.length) {
+      for (let i = end; i >= start + 6; i--) {
+        if (/[.!?;:,]["'”’)]*$/.test(tokens[i - 1])) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const offset = line.input.length;
+    const result = engine.run({
+      ...request,
+      text: tokens.slice(start, end).join(' '),
+      excluded_pronunciations: request.excluded_pronunciations
+        ?.filter((exclusion) => exclusion.start >= offset)
+        .map((exclusion) => ({ ...exclusion, start: exclusion.start - offset, end: exclusion.end - offset })),
+    });
+    if (!result.hearings.length) return line;
+    if (offset) line.boundaries.push(offset);
+    line.boundaries.push(...result.boundaries.map((boundary) => boundary + offset));
+    line.words.push(...result.words);
+    line.input.push(...result.input);
+    phrases.push(result.hearings.map(({ text, words }) => ({
+      text,
+      words: words.map((word) => ({ ...word, start: word.start + offset, end: word.end + offset })),
+    })));
+    start = end;
+  }
+
+  const count = Math.max(...phrases.map((phrase) => phrase.length));
+  for (let index = 0; index < count; index++) {
+    const parts = phrases.map((phrase) => phrase[index % phrase.length]);
+    line.hearings.push({
+      text: parts.map((part) => part.text).join(' '),
+      words: parts.flatMap((part) => part.words),
+    });
+  }
+  return line;
 }
 
 self.onmessage = async (event: MessageEvent<ToWorker>) => {
   const message = event.data;
   try {
     if (message.type === 'init') {
-      await start(message.lexicon);
+      await start();
       return;
     }
     if (!app) throw new Error('the engine is not loaded yet');
-    if (message.type === 'run') {
-      if (message.request.search.fit > 0) await ensureBigrams();
-      let rebuildMs = 0;
-      if (!sameLexicon(message.lexicon, lexicon)) {
-        const t = performance.now();
-        app.setLexicon(message.lexicon);
-        lexicon = message.lexicon;
-        rebuildMs = performance.now() - t;
-      }
-      const t = performance.now();
-      const result = app.run(message.request);
-      post({
-        type: 'result',
-        id: message.id,
-        result,
-        ms: performance.now() - t,
-        info: app.lexiconInfo(),
-        rebuildMs,
-        memoryMb: memory ? memory.buffer.byteLength / 1e6 : 0,
-        notice:
-          message.request.search.fit > 0 && bigrams === 'missing'
-            ? 'No word-pair counts (run scripts/download_bigrams.sh, then npm run data in web/): scoring words alone.'
-            : undefined,
-      });
-    }
+    if (message.request.search.fit > 0) await ensureBigrams();
+    const started = performance.now();
+    const result = runLine(app, message.request);
+    post({ type: 'result', id: message.id, result, elapsedMs: performance.now() - started });
   } catch (err) {
     post({
       type: 'error',

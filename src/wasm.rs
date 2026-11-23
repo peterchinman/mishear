@@ -12,7 +12,7 @@ use crate::deform::VowelChart;
 use crate::engine::{Engine, MishearConfig, Variety};
 use crate::lexicon::{BIGRAM_PRIOR, Frequency, SpellingVariants, parse_frequencies};
 use crate::phone::Ph;
-use crate::search::SearchConfig;
+use crate::search::{PronunciationExclusion, SearchConfig};
 use crate::spec::{self, StepSpec};
 use crate::{accents, knobs};
 use std::sync::Arc;
@@ -111,6 +111,42 @@ pub struct RequestDto {
     pub deformation: DeformationDto,
     pub search: SearchDto,
     pub cost: CostDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_pronunciations: Option<Vec<PronunciationExclusionDto>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Tsify)]
+pub struct PronunciationExclusionDto {
+    pub start: usize,
+    pub end: usize,
+    pub pronunciation: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word: Option<String>,
+}
+
+impl From<SearchDto> for MishearConfig {
+    fn from(s: SearchDto) -> Self {
+        Self {
+            search: SearchConfig {
+                results: s.results.max(1),
+                bound: s.within.unwrap_or(2.0),
+                commonness: s.commonness,
+                familiar: s.familiar,
+                fit: s.fit,
+                word_penalty: s.word_penalty,
+                shortlist: s.shortlist,
+                beam: s.beam.max(1),
+                distinct_sounds: s.distinct_sounds,
+                ..SearchConfig::default()
+            },
+            novelty: s.novelty,
+            function_word_share: s.function_share,
+            root: s.root,
+            crossing: s.crossing,
+            variety: s.variety,
+            max_bound: s.within.unwrap_or(s.max_bound),
+        }
+    }
 }
 
 #[derive(Serialize, Debug, Tsify)]
@@ -126,6 +162,8 @@ pub struct HeardWordDto {
     /// The input phonemes it covers: `[start, end)`.
     pub start: usize,
     pub end: usize,
+    /// Identifies the selected pronunciation within the current lexicon.
+    pub pronunciation: u32,
 }
 
 #[derive(Serialize, Debug, Tsify)]
@@ -361,51 +399,45 @@ impl MishearApp {
         );
     }
 
+    fn update_cost(&mut self, cost: CostDto) {
+        if self.cost != Some(cost) {
+            self.engine.cost = CostModel::new(cost.into());
+            self.cost = Some(cost);
+        }
+    }
+
     /// Runs one request: deform and hear text, or hear phonemes.
     pub fn run(&mut self, request: RequestDto) -> Result<ResultDto, JsError> {
-        if self.cost != Some(request.cost) {
-            self.engine.cost = CostModel::new(request.cost.into());
-            self.cost = Some(request.cost);
-        }
-        let s = request.search;
-        let search_config = SearchConfig {
-            results: s.results.max(1),
-            bound: s.within.unwrap_or(2.0),
-            commonness: s.commonness,
-            familiar: s.familiar,
-            fit: s.fit,
-            word_penalty: s.word_penalty,
-            shortlist: s.shortlist,
-            beam: s.beam.max(1),
-            distinct_sounds: s.distinct_sounds,
-            ..SearchConfig::default()
-        };
-        let max_bound = s.within.unwrap_or(s.max_bound);
+        self.update_cost(request.cost);
+        let mut config: MishearConfig = request.search.into();
         let lexicon = &self.engine.lexicon;
-        let hearing = |words: &[crate::lexicon::WordId], spans: &[std::ops::Range<usize>]| {
-            words
-                .iter()
-                .zip(spans)
-                .map(|(&w, span)| HeardWordDto {
-                    text: lexicon.word(w).to_string(),
-                    start: span.start,
-                    end: span.end,
-                })
-                .collect::<Vec<_>>()
-        };
+        config.search.excluded_pronunciations = request
+            .excluded_pronunciations
+            .unwrap_or_default()
+            .into_iter()
+            .map(|x| PronunciationExclusion {
+                span: x.start..x.end,
+                pronunciation: x.pronunciation,
+                word: x.word.as_deref().and_then(|word| lexicon.id(word)),
+            })
+            .collect();
         match request.mode {
             Mode::Phonemes => {
                 let input = Ph::parse_all(&request.text)
                     .filter(|p| !p.is_empty())
                     .ok_or_else(|| JsError::new("expected ARPAbet phonemes, e.g. K IH1 S"))?;
                 let variety = Variety {
-                    variety: s.variety,
-                    root: s.root,
-                    function_word_share: s.function_share,
+                    variety: config.variety,
+                    root: config.root,
+                    function_word_share: config.function_word_share,
                 };
-                let (matches, stats) =
-                    self.engine
-                        .hear_varied(&input, &search_config, variety, max_bound, |_| false);
+                let (matches, stats) = self.engine.hear_varied(
+                    &input,
+                    &config.search,
+                    variety,
+                    config.max_bound,
+                    |_| false,
+                );
                 Ok(ResultDto {
                     words: Vec::new(),
                     input: spelled(&input),
@@ -420,7 +452,18 @@ impl MishearApp {
                             related: 0,
                             kept: 0,
                             reused: *reused,
-                            words: hearing(&m.words, &m.spans),
+                            words: m
+                                .words
+                                .iter()
+                                .zip(&m.spans)
+                                .zip(&m.pronunciations)
+                                .map(|((&w, span), &pronunciation)| HeardWordDto {
+                                    text: lexicon.word(w).to_string(),
+                                    start: span.start,
+                                    end: span.end,
+                                    pronunciation,
+                                })
+                                .collect(),
                         })
                         .collect(),
                     stats: StatsDto {
@@ -439,15 +482,6 @@ impl MishearApp {
                     u64::from(request.deformation.seed),
                 )
                 .map_err(|e| JsError::new(&e))?;
-                let config = MishearConfig {
-                    search: search_config,
-                    novelty: s.novelty,
-                    function_word_share: s.function_share,
-                    root: s.root,
-                    crossing: s.crossing,
-                    variety: s.variety,
-                    max_bound,
-                };
                 let m = self
                     .engine
                     .mishear(&request.text, &deformation, &config)
@@ -482,10 +516,12 @@ impl MishearApp {
                                 .words
                                 .iter()
                                 .zip(&h.spans)
-                                .map(|(w, span)| HeardWordDto {
+                                .zip(&h.pronunciations)
+                                .map(|((w, span), &pronunciation)| HeardWordDto {
                                     text: w.clone(),
                                     start: span.start,
                                     end: span.end,
+                                    pronunciation,
                                 })
                                 .collect(),
                         })

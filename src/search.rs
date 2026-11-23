@@ -43,6 +43,15 @@ use crate::lexicon::{Lexicon, WordId};
 use crate::phone::Ph;
 
 #[derive(Debug, Clone)]
+pub struct PronunciationExclusion {
+    pub span: Range<usize>,
+    /// Identifies a pronunciation within the current lexicon.
+    pub pronunciation: u32,
+    /// When present, block this spelling and the pronunciation on overlapping spans.
+    pub word: Option<WordId>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SearchConfig {
     /// How many matches to return.
     pub results: usize,
@@ -74,6 +83,8 @@ pub struct SearchConfig {
     /// nothing. Depending only on where a word starts, it leaves the search
     /// exact.
     pub boundary_cost: Vec<f32>,
+    /// Pronunciations and, optionally, words excluded around specified input spans.
+    pub excluded_pronunciations: Vec<PronunciationExclusion>,
     /// With bigrams (see [`Self::bigrams`]) the search is exact only up to
     /// its per-span shortlist of `shortlist` words (the best word for a span
     /// depends on its predecessor) and its `beam` of partial matches per
@@ -146,6 +157,7 @@ impl Default for SearchConfig {
             word_penalty: 0.4,
             extra: HashMap::new(),
             boundary_cost: Vec::new(),
+            excluded_pronunciations: Vec::new(),
             shortlist: 30,
             beam: 100,
             distinct_sounds: true,
@@ -159,6 +171,8 @@ pub struct Match {
     pub words: Vec<WordId>,
     /// The input span each word covers.
     pub spans: Vec<Range<usize>>,
+    /// The pronunciation trie node selected for each word.
+    pub pronunciations: Vec<u32>,
     /// Everything: phonetic + language + extra.
     pub cost: f32,
     /// The phonetic edit cost alone.
@@ -192,6 +206,7 @@ pub struct SearchStats {
 #[derive(Clone, Copy)]
 struct Edge {
     word: WordId,
+    pronunciation: u32,
     phonetic: f32,
     /// phonetic + language + extra.
     total: f32,
@@ -292,12 +307,24 @@ pub fn lattice(
         }
         let mut walk = Walk {
             input: &input[s..s + span_max],
+            input_start: s,
             lexicon,
             cost,
             bound: config.bound - before,
             keep,
             word_cost: &word_cost,
             subtree_min: &subtree_min,
+            exclusions: config
+                .excluded_pronunciations
+                .iter()
+                .filter(|x| {
+                    if x.word.is_some() {
+                        s < x.span.end && x.span.start < x.span.end && x.span.start < s + span_max
+                    } else {
+                        x.span.start == s && s < x.span.end
+                    }
+                })
+                .collect(),
             width: span_max + 1,
             columns: vec![f32::INFINITY; (lexicon.max_depth() + 1) * (span_max + 1)],
             best: vec![Vec::new(); span_max],
@@ -365,6 +392,7 @@ pub fn paths(
         cost: 0.0,
         phonetic: 0.0,
         word: WordId::MAX,
+        pronunciation: 0,
         start: 0,
         prev: u32::MAX,
         hash: 0x9E37_79B9_7F4A_7C15,
@@ -437,6 +465,7 @@ pub fn paths(
                         cost: total,
                         phonetic: prev.phonetic + edge.phonetic,
                         word: edge.word,
+                        pronunciation: edge.pronunciation,
                         start: s as u32,
                         prev: p,
                         hash: mix(
@@ -505,20 +534,24 @@ pub fn paths(
         .map(|&p| {
             let mut words = Vec::new();
             let mut spans = Vec::new();
+            let mut pronunciations = Vec::new();
             let mut end = n;
             let mut node = &arena[p as usize];
             let (cost, phonetic) = (node.cost, node.phonetic);
             while node.prev != u32::MAX {
                 words.push(node.word);
                 spans.push(node.start as usize..end);
+                pronunciations.push(node.pronunciation);
                 end = node.start as usize;
                 node = &arena[node.prev as usize];
             }
             words.reverse();
             spans.reverse();
+            pronunciations.reverse();
             Match {
                 words,
                 spans,
+                pronunciations,
                 cost,
                 phonetic,
             }
@@ -617,6 +650,7 @@ struct Partial {
     cost: f32,
     phonetic: f32,
     word: WordId,
+    pronunciation: u32,
     start: u32,
     prev: u32,
     hash: u64,
@@ -653,12 +687,15 @@ fn subtree_min_cost(lexicon: &Lexicon, word_cost: &[f32]) -> Vec<f32> {
 struct Walk<'a> {
     /// The input from the start position, as far as a word can reach.
     input: &'a [Ph],
+    input_start: usize,
     lexicon: &'a Lexicon,
     cost: &'a CostModel,
     bound: f32,
     keep: usize,
     word_cost: &'a [f32],
     subtree_min: &'a [f32],
+    /// Exclusions that can affect a word beginning at this input position.
+    exclusions: Vec<&'a PronunciationExclusion>,
     /// Column length: `input.len() + 1`.
     width: usize,
     /// One column per trie depth: `columns[d * width + k]` is the cheapest
@@ -682,6 +719,7 @@ impl Walk<'_> {
         let w = self.width;
         let lexicon = self.lexicon;
         for &(q, child) in lexicon.children(node) {
+            let pronunciation = child;
             let child = child as usize;
             self.nodes += 1;
             let (above, below) = self.columns.split_at_mut((depth + 1) * w);
@@ -724,7 +762,18 @@ impl Walk<'_> {
                 // Span k + 1 is the first k + 1 input phonemes.
                 for (k, &phonetic) in below[1..w].iter().enumerate() {
                     let total = phonetic + word_cost;
-                    if total <= self.bound {
+                    if total <= self.bound
+                        && !self.exclusions.iter().any(|x| {
+                            let end = self.input_start + k + 1;
+                            match x.word {
+                                Some(excluded) => {
+                                    x.span.start < end
+                                        && (word == excluded || x.pronunciation == pronunciation)
+                                }
+                                None => x.span.end == end && x.pronunciation == pronunciation,
+                            }
+                        })
+                    {
                         offer(
                             &mut self.best[k],
                             self.keep,
@@ -733,6 +782,7 @@ impl Walk<'_> {
                             k,
                             Edge {
                                 word,
+                                pronunciation,
                                 phonetic,
                                 total,
                             },
@@ -810,6 +860,136 @@ mod tests {
         })
         .collect();
         Lexicon::build(&dict, &frequencies, 100, true, |_, _| true)
+    }
+
+    fn test_lexicon(entries: &[u8], words: &[&str]) -> Lexicon {
+        let dict = CmuDictionary::from_bytes(entries).unwrap();
+        let frequencies: Vec<_> = words
+            .iter()
+            .map(|&word| Frequency {
+                word: word.into(),
+                zipf: 5.0,
+            })
+            .collect();
+        Lexicon::build(&dict, &frequencies, 100, true, |_, _| true)
+    }
+
+    #[test]
+    fn excluding_one_pronunciation_can_move_boundaries_and_keeps_other_spans_available() {
+        let lexicon = test_lexicon(
+            b"FLY  F L AY1\nFLYING  F L AY1 IH1 N\nIN  IH1 N\n",
+            &["fly", "flying", "in"],
+        );
+        let input = Ph::parse_all("F L AY1 IH1 N F L AY1 IH1 N").unwrap();
+        let cost = CostModel::default();
+        let mut config = SearchConfig {
+            results: 1,
+            bound: 1.0,
+            commonness: 0.0,
+            word_penalty: 0.3,
+            ..SearchConfig::default()
+        };
+        let (initial, _) = search(&input, &lexicon, &cost, &config);
+        let first = &initial[0];
+        assert_eq!(first.text(&lexicon), "flying flying");
+        let pronunciation = first.pronunciations[0];
+        config.excluded_pronunciations.push(PronunciationExclusion {
+            span: first.spans[0].clone(),
+            pronunciation,
+            word: Some(first.words[0]),
+        });
+
+        let (regenerated, _) = search(&input, &lexicon, &cost, &config);
+        let next = &regenerated[0];
+        assert_eq!(next.text(&lexicon), "fly in flying");
+        assert_eq!(next.spans, [0..3, 3..5, 5..10]);
+        assert_eq!(next.pronunciations[2], pronunciation);
+    }
+
+    #[test]
+    fn exclusion_blocks_homophones_and_allows_the_same_words_other_pronunciation() {
+        let lexicon = test_lexicon(
+            b"LEAD  L IY1 D\nLEAD(1)  L EH1 D\nLED  L EH1 D\n",
+            &["lead", "led"],
+        );
+        let input = Ph::parse_all("L EH1 D").unwrap();
+        let cost = CostModel::default();
+        let mut config = SearchConfig {
+            results: 10,
+            bound: 2.0,
+            commonness: 0.0,
+            fit: 0.0,
+            distinct_sounds: false,
+            ..SearchConfig::default()
+        };
+        let (initial, _) = search(&input, &lexicon, &cost, &config);
+        let lead = initial.iter().find(|m| m.text(&lexicon) == "lead").unwrap();
+        let led = initial.iter().find(|m| m.text(&lexicon) == "led").unwrap();
+        assert_eq!(lead.pronunciations, led.pronunciations);
+        config.excluded_pronunciations.push(PronunciationExclusion {
+            span: 0..3,
+            pronunciation: lead.pronunciations[0],
+            word: None,
+        });
+
+        let (regenerated, _) = search(&input, &lexicon, &cost, &config);
+        assert!(regenerated.iter().all(|m| m.text(&lexicon) != "led"));
+        let next = regenerated
+            .iter()
+            .find(|m| m.text(&lexicon) == "lead")
+            .unwrap();
+        assert_ne!(next.pronunciations, lead.pronunciations);
+        assert!(next.phonetic > lead.phonetic);
+    }
+
+    #[test]
+    fn clicked_word_exclusion_covers_both_pronunciation_variants_and_shifted_boundaries() {
+        let lexicon = test_lexicon(
+            b"LEAD  L IY1 D\nLEAD(1)  L EH1 D\nLED  L EH1 D\nRED  R EH1 D\n",
+            &["lead", "led", "red"],
+        );
+        let input = Ph::parse_all("L EH1 D L EH1 D").unwrap();
+        let cost = CostModel::default();
+        let mut config = SearchConfig {
+            bound: 4.0,
+            fit: 0.0,
+            commonness: 0.0,
+            ..SearchConfig::default()
+        };
+        let lead = lexicon.id("lead").unwrap();
+        let led = lexicon.id("led").unwrap();
+        let initial = lattice(&input, &lexicon, &cost, &config, 8);
+        let pronunciation = initial.edges[3][2]
+            .iter()
+            .find(|edge| edge.word == lead)
+            .unwrap()
+            .pronunciation;
+        config.excluded_pronunciations.push(PronunciationExclusion {
+            span: 3..6,
+            pronunciation,
+            word: Some(lead),
+        });
+
+        let regenerated = lattice(&input, &lexicon, &cost, &config, 8);
+        // The adjacent occurrence can still match the same word and pronunciation.
+        assert!(
+            regenerated.edges[0][2]
+                .iter()
+                .any(|edge| edge.word == lead && edge.pronunciation == pronunciation)
+        );
+        // Both boundaries can move. Overlapping spans must reject the spelling
+        // even with another pronunciation, and the sound even with another spelling.
+        for (start, end) in [(0, 4), (3, 6), (4, 6)] {
+            let before = &initial.edges[start][end - start - 1];
+            let after = &regenerated.edges[start][end - start - 1];
+            assert!(before.iter().any(|edge| edge.word == lead));
+            assert!(before.iter().any(|edge| edge.word == led));
+            assert!(
+                after
+                    .iter()
+                    .all(|edge| edge.word != lead && edge.pronunciation != pronunciation)
+            );
+        }
     }
 
     /// Every word sequence's best cost over every segmentation, by brute

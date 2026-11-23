@@ -1,23 +1,19 @@
-import './style.css';
+import './theme';
 import type {
   CostDto,
-  DefaultsDto,
   DeformationDto,
-  LexiconInfoDto,
-  LexiconOptions,
-  Mode,
+  PronunciationExclusionDto,
   RequestDto,
-  ResultDto,
   SearchDto,
 } from 'mishear';
 import defaultProfiles from './default-profiles.json';
+import { copyText } from './clipboard';
 import { SOURCES } from './lines';
-import { sameLexicon as same, type FromWorker, type ToWorker } from './protocol';
+import type { FromWorker, LineHearing, LineResult, SettingsDefaults, ToWorker } from './protocol';
 
 // ---------------------------------------------------------------- knobs ----
 
-interface NumberKnob {
-  type: 'number';
+interface Knob {
   key: string;
   label: string;
   hint: string;
@@ -28,46 +24,29 @@ interface NumberKnob {
   step: number;
   /** Optional knobs (`null` in Rust) get an on/off box; this is the value they turn on at. */
   onValue?: number;
-  /** Rebuilds the lexicon: apply on release, not while dragging. */
-  heavy?: boolean;
 }
-interface BoolKnob {
-  type: 'bool';
-  key: string;
-  label: string;
-  hint: string;
-  /** The technical description, behind the knob's ⓘ button. */
-  info: string;
-  heavy?: boolean;
-}
-type Knob = NumberKnob | BoolKnob;
-type Group = 'search' | 'cost' | 'lexicon';
+type Group = 'search' | 'cost';
 
 const SEARCH_KNOBS: Knob[] = [
-  { type: 'number', key: 'results', label: 'results', hint: 'How many hearings to show.', info: 'The exact top N hearings by total cost.', min: 1, max: 50, step: 1 },
   {
-    type: 'number',
     key: 'familiar',
     label: 'familiar words',
-    hint: 'Vocabulary size: this many of the most common words pay no rarity cost.',
-    info: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no rarity cost, and a rarer word pays for how much rarer it is than the last of them. “Rarity cost” sets how steep that edge is. Off: every word pays for all its rarity, “the” included, so rarity cost also favors hearings of fewer words.',
+    hint: 'This many of the most common words pay no rarity cost.',
+    info: 'The listener’s vocabulary: the lexicon’s most frequent words up to this many pay no rarity cost, and a rarer word pays for how much rarer it is than the last of them. “Rarity cost” sets how steep that edge is.',
     min: 500,
     max: 50000,
     step: 500,
-    onValue: 14000,
   },
   {
-    type: 'number',
     key: 'commonness',
     label: 'rarity cost',
     hint: 'How strongly common words are preferred over rare ones.',
-    info: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ (all of it when “familiar words” is off): how much common words are preferred, or how steep the edge of the vocabulary is. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. 0: a rare word costs no more than “the”. With “familiar words” off and this high, hearings collapse into single long words (“recommendations”).',
+    info: 'Cost per nat of a word’s rarity, −ln P(word), beyond the familiar words’ rarity. A word twice as rare as the last familiar one pays 0.7 × this; ten times as rare, 2.3 ×. At 0, a rare word costs no more than “the”.',
     min: 0,
     max: 1,
     step: 0.005,
   },
   {
-    type: 'number',
     key: 'fit',
     label: 'sense',
     hint: 'How much each word must make sense after the one before.',
@@ -76,36 +55,8 @@ const SEARCH_KNOBS: Knob[] = [
     max: 1,
     step: 0.005,
   },
-  { type: 'number', key: 'word_penalty', label: 'cost per word', hint: 'Higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s cost per word + rarity cost + sense never goes below zero.', min: 0, max: 2, step: 0.01 },
+  { key: 'word_penalty', label: 'cost per word', hint: 'Higher prefers fewer, longer words.', info: 'Added to every heard word’s cost, so it trades many short words against fewer long ones. A word’s cost per word + rarity cost + sense never goes below zero.', min: 0, max: 2, step: 0.01 },
   {
-    type: 'number',
-    key: 'shortlist',
-    label: 'bigram shortlist',
-    hint: 'Pair-search width: wider is more exact and slower.',
-    info: 'With sense above 0: words kept per input span before the previous word is known. The search is exact only up to it.',
-    min: 5,
-    max: 200,
-    step: 1,
-  },
-  {
-    type: 'number',
-    key: 'beam',
-    label: 'bigram beam',
-    hint: 'Partial hearings the pair search keeps: wider is more exact, slower.',
-    info: 'With sense above 0: partial hearings kept per position. Wider is closer to exact and slower. At a small sense weight, narrow costs nothing; at 0.1, 50 makes a few hearings slightly worse than 400.',
-    min: 10,
-    max: 400,
-    step: 10,
-  },
-  {
-    type: 'bool',
-    key: 'distinct_sounds',
-    label: 'merge same-sound hearings',
-    hint: 'Merge hearings that sound the same (“there” / “their”).',
-    info: 'Treat hearings with the same sounds, spelled differently, as one, keeping the cheapest spelling. Off: list every spelling.',
-  },
-  {
-    type: 'number',
     key: 'novelty',
     label: 'novelty',
     hint: 'Penalty for hearing the line’s own words back, in any form.',
@@ -115,17 +66,6 @@ const SEARCH_KNOBS: Knob[] = [
     step: 0.05,
   },
   {
-    type: 'number',
-    key: 'variety',
-    label: 'variety of list',
-    hint: 'Penalty for reusing words from the hearings above, so the list varies.',
-    info: 'Extra cost per word an earlier hearing in the list used, in any form (“arrive” after “arrives”), or a homophone of one (“cents” after “sense”), as novelty does for the line’s own words. Each hearing is then the best one given those above it, so the list varies. 0: the plain top N, which often differ by a word. With bigrams on, it slows the search several-fold.',
-    min: 0,
-    max: 5,
-    step: 0.05,
-  },
-  {
-    type: 'number',
     key: 'root',
     label: 'same-root penalty',
     hint: 'Penalty for words sharing a root with the line’s (“flying” for “fly”).',
@@ -135,7 +75,6 @@ const SEARCH_KNOBS: Knob[] = [
     step: 0.05,
   },
   {
-    type: 'number',
     key: 'function_share',
     label: 'function-word share',
     hint: 'How much of those penalties small words like “the” pay.',
@@ -145,7 +84,6 @@ const SEARCH_KNOBS: Knob[] = [
     step: 0.05,
   },
   {
-    type: 'number',
     key: 'crossing',
     label: 'cross word boundaries',
     hint: 'Reward for cutting across the line’s word breaks (“this guy” for “the sky”).',
@@ -154,17 +92,15 @@ const SEARCH_KNOBS: Knob[] = [
     max: 3,
     step: 0.05,
   },
-  { type: 'number', key: 'max_bound', label: 'max bound', hint: 'How far the search keeps looking before settling for fewer results.', info: 'The top-N search raises its cost bound in rounds until N hearings fit under it; this caps the bound. Lower is faster on lines with few good hearings, and may return fewer.', min: 2, max: 60, step: 0.5 },
 ];
 
 const COST_KNOBS: Knob[] = [
-  { type: 'number', key: 'vowel_substitution', label: 'vowel substitution', hint: 'Cost of hearing one vowel as another.', info: 'Cost of hearing one vowel as the farthest-apart other on the vowel chart; nearer vowels cost proportionally less.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'consonant_substitution', label: 'consonant substitution', hint: 'Cost of hearing one consonant as another.', info: 'Cost of hearing one consonant as the most different other, by place, manner, voicing and sibilance; closer consonants cost proportionally less.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'stressed_vowel_indel', label: 'stressed vowel add/drop', hint: 'Cost of adding or dropping a stressed syllable.', info: 'Hearing a stressed vowel (a syllable) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'unstressed_vowel_indel', label: 'unstressed vowel add/drop', hint: 'Cost of adding or dropping an unstressed syllable.', info: 'Hearing an unstressed vowel (mostly a schwa) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
-  { type: 'number', key: 'consonant_indel', label: 'consonant add/drop', hint: 'Cost of adding or dropping a consonant.', info: 'Hearing a consonant that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { key: 'vowel_substitution', label: 'vowel substitution', hint: 'Cost of hearing one vowel as another.', info: 'Cost of hearing one vowel as the farthest-apart other on the vowel chart; nearer vowels cost proportionally less.', min: 0, max: 3, step: 0.05 },
+  { key: 'consonant_substitution', label: 'consonant substitution', hint: 'Cost of hearing one consonant as another.', info: 'Cost of hearing one consonant as the most different other, by place, manner, voicing and sibilance; closer consonants cost proportionally less.', min: 0, max: 3, step: 0.05 },
+  { key: 'stressed_vowel_indel', label: 'stressed vowel add/drop', hint: 'Cost of adding or dropping a stressed syllable.', info: 'Hearing a stressed vowel (a syllable) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { key: 'unstressed_vowel_indel', label: 'unstressed vowel add/drop', hint: 'Cost of adding or dropping an unstressed syllable.', info: 'Hearing an unstressed vowel (mostly a schwa) that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
+  { key: 'consonant_indel', label: 'consonant add/drop', hint: 'Cost of adding or dropping a consonant.', info: 'Hearing a consonant that isn’t there, or missing one.', min: 0, max: 3, step: 0.05 },
   {
-    type: 'number',
     key: 'stress_mismatch',
     label: 'rhythm (stress mismatch)',
     hint: 'How closely hearings must keep the line’s rhythm.',
@@ -174,7 +110,6 @@ const COST_KNOBS: Knob[] = [
     step: 0.05,
   },
   {
-    type: 'number',
     key: 'swap',
     label: 'adjacent swap',
     hint: 'Allow swapped neighbouring consonants (“ask” ↔ “aks”) at this cost.',
@@ -186,42 +121,18 @@ const COST_KNOBS: Knob[] = [
   },
 ];
 
-const LEXICON_KNOBS: Knob[] = [
-  { type: 'number', key: 'vocabulary', label: 'vocabulary', hint: 'How many of the most common words hearings can use.', info: 'The most frequent words kept from the word-frequency list. Every frequent word is in, names and brands included, but single letters other than “a” and “I”; two-letter words but English ones (“to”, “us”); abbreviations (said as letters, “TV”; spelled without a vowel, “Sr”; read as the longer word, “etc”); and hand-made lists of foreign words (“le”, “un”), fragments (“ve”, “ing”), clipped words (“gov”, “app”), short names (“jo”) and interjections (“um”, “hmm”, “ooh”). Changing it rebuilds the lexicon.', min: 1000, max: 100000, step: 1000, heavy: true },
-  { type: 'bool', key: 'all_pronunciations', label: 'every pronunciation', hint: 'Use every dictionary pronunciation of a word, not just the first.', info: 'Match each word under every CMUdict pronunciation (“either” as EE-ther and EYE-ther), or only its first. Changing it rebuilds the lexicon.', heavy: true },
-  {
-    type: 'number',
-    key: 'bigram_prior',
-    label: 'bigram smoothing μ',
-    hint: 'How far rarely seen word pairs fall back on single-word frequencies.',
-    info: 'Dirichlet smoothing: how far a rarely seen word pair falls back on the single-word frequency. The Google Books counts run to billions, so this is large; scores on held-out text barely change between 10,000 and 1,000,000.',
-    min: 1000,
-    max: 1000000,
-    step: 1000,
-    heavy: true,
-  },
-];
-
 // ---------------------------------------------------------------- state ----
 
 interface State {
   /** The saved format: 3 and up save settings as changes from the defaults;
    * 4 has commonness and fit. */
   v?: number;
-  mode: Mode;
   text: string;
-  phonemes: string;
   search: SearchDto;
   cost: CostDto;
-  lexicon: LexiconOptions;
-  autoRun: boolean;
-  sweepKnob: string;
-  sweepValues: string;
   /** The profile last applied or saved, if any (see "profiles"). */
   profile?: string;
-  /** Profiles whose hearings show beside the current knobs'. */
-  compare?: string[];
-  /** Where "random line" picks from: a key of SOURCES, or "either". */
+  /** Where "random line" picks from. */
   lineSource?: string;
 }
 
@@ -229,33 +140,26 @@ interface State {
 // reaches everyone who hadn't touched that setting.
 const STORAGE_KEY = 'mishear-web-state-v3';
 const OLD_STORAGE_KEY = 'mishear-web-state-v2';
-const FIRST_LINE = 'The large room was full of people.';
-let defaults: DefaultsDto;
+let defaults: SettingsDefaults;
 let state: State;
-let lexiconInfo: LexiconInfoDto | null = null;
 
 function defaultState(): State {
   return {
-    mode: 'mishear',
-    text: FIRST_LINE,
-    phonemes: 'K IH1 S DH AH0 S K AY1',
-    search: { ...defaults.search },
-    cost: { ...defaults.cost },
-    lexicon: { ...defaults.lexicon },
-    autoRun: true,
-    sweepKnob: 'search.fit',
-    sweepValues: '0, 0.02, 0.05, 0.1, 0.2',
+    text: '',
+    ...fullProfile(BUILTIN_PROFILES[BASE_PROFILE]),
+    profile: BASE_PROFILE,
   };
 }
 
-/** The settings in the link, or else the saved ones, in the current format. */
+/** Reads settings from a shared link or local storage. */
 function readSaved(): Partial<State> | null {
   try {
     const hash = location.hash.slice(1);
     if (hash) return upgrade(JSON.parse(decodeURIComponent(hash)));
-    const current = localStorage.getItem(STORAGE_KEY);
-    if (current) return upgrade(JSON.parse(current));
-    return upgrade(JSON.parse(localStorage.getItem(OLD_STORAGE_KEY) ?? 'null'));
+    const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(OLD_STORAGE_KEY);
+    const saved = upgrade(JSON.parse(stored ?? 'null'));
+    if (saved) delete saved.text;
+    return saved;
   } catch {
     return null;
   }
@@ -272,8 +176,7 @@ function upgrade(saved: Partial<State> | null): Partial<State> | null {
     const { lm_weight, bigrams, ...search } = (saved.search ?? {}) as Record<string, unknown>;
     if (typeof lm_weight === 'number') Object.assign(search, { commonness: lm_weight, fit: lm_weight });
     if (bigrams === false) search.fit = 0;
-    const sweepKnob = saved.sweepKnob === 'search.lm_weight' ? 'search.fit' : saved.sweepKnob;
-    saved = { ...saved, v: 4, search: search as unknown as SearchDto, sweepKnob };
+    saved = { ...saved, v: 4, search: search as unknown as SearchDto };
   }
   if (saved.v === 4) saved = { ...saved, v: 5 };
   return saved;
@@ -283,44 +186,40 @@ function loadState(): State {
   const base = defaultState();
   const saved = readSaved();
   if (!saved) return base;
-  // The page no longer deforms lines: drop what earlier formats saved for it.
-  const { steps, deform, deformation, soundsOpen, ...kept } = saved as Partial<State> & Record<string, unknown>;
-  // Merge over the defaults, so knobs added since are filled in.
-  return {
+  const search = editableSearch(unsaved(saved.search));
+  const loaded: State = {
     ...base,
-    ...kept,
-    // "only within cost" is gone from the page: the top N, always.
-    search: { ...base.search, ...unsaved(saved.search), within: base.search.within },
-    cost: { ...base.cost, ...unsaved(saved.cost) },
-    lexicon: { ...base.lexicon, ...withoutWordLists(unsaved(saved.lexicon)) },
+    v: saved.v,
+    text: singleLine(saved.text ?? base.text),
+    search: { ...defaults.search, ...search, familiar: familiarWordCount(search.familiar) },
+    cost: { ...defaults.cost, ...unsaved(saved.cost) },
+    profile: saved.profile,
+    lineSource: saved.lineSource && Object.hasOwn(SOURCES, saved.lineSource) ? saved.lineSource : undefined,
   };
+  if (loaded.profile === undefined && sameSettings(loaded, base)) loaded.profile = BASE_PROFILE;
+  return loaded;
 }
 
-/** Lexicon options minus the word lists earlier formats chose between
- * (ENABLE, SCOWL): every word is in now. */
-function withoutWordLists(lexicon: Partial<LexiconOptions>): Partial<LexiconOptions> {
-  const { common_words, word_list, scowl_level, ...kept } = lexicon as Record<string, unknown>;
-  return kept as Partial<LexiconOptions>;
+/** Older profiles and links can include engine options the site now fixes. */
+function editableSearch(search: Profile['search'] = {}) {
+  const { results, within, distinct_sounds, variety, shortlist, beam, max_bound, ...knobs } = search;
+  return knobs;
 }
 
-/** `state` minus the knobs at their defaults (`null` marks an optional knob turned off). */
-function savedState(): Partial<State> {
-  const base = defaultState();
+/** Settings that differ from the defaults. An explicit `null` turns an optional knob off. */
+function savedState(): Omit<Partial<State>, 'text'> {
   const changed = (values: object, defaults: object) =>
     Object.fromEntries(
       Object.entries({ ...defaults, ...values })
         .filter(([k, v]) => v !== (defaults as Record<string, unknown>)[k])
         .map(([k, v]) => [k, v ?? null]),
     );
-  const top = Object.fromEntries(
-    Object.entries(state).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(base[k as keyof State])),
-  );
   return {
-    ...top,
     v: 5,
-    search: changed(state.search, base.search) as unknown as SearchDto,
-    cost: changed(state.cost, base.cost) as unknown as CostDto,
-    lexicon: changed(state.lexicon, base.lexicon) as unknown as LexiconOptions,
+    profile: state.profile,
+    lineSource: state.lineSource,
+    search: changed(state.search, defaults.search) as unknown as SearchDto,
+    cost: changed(state.cost, defaults.cost) as unknown as CostDto,
   };
 }
 
@@ -333,27 +232,31 @@ function unsaved<T extends object>(values: T | undefined): Partial<T> {
   return Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k, v ?? undefined])) as Partial<T>;
 }
 
-function groupValues(group: Group): Record<string, unknown> {
-  return state[group] as unknown as Record<string, unknown>;
+function familiarWordCount(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : defaults.search.familiar ?? 14000;
 }
-function groupDefaults(group: Group): Record<string, unknown> {
-  return defaults[group] as unknown as Record<string, unknown>;
+
+function groupValues(group: Group, settings: ProfileSettings = state): Record<string, unknown> {
+  return settings[group] as unknown as Record<string, unknown>;
 }
 
 /** The page hears lines as spoken. */
 const NO_DEFORMATION: DeformationDto = { steps: [], intensity: 1, seed: 0 };
 
-/** The input split into lines, each heard on its own. */
-function inputLines(): string[] {
-  const text = state.mode === 'mishear' ? state.text : state.phonemes;
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+function singleLine(text: string): string {
+  return text.replace(/[\r\n\u2028\u2029]+/g, ' ');
 }
 
-function request(text: string, search: SearchDto = state.search, cost: CostDto = state.cost): RequestDto {
-  return { mode: state.mode, text, deformation: NO_DEFORMATION, search, cost };
+function request(text: string, results: number): RequestDto {
+  return {
+    mode: 'mishear',
+    text,
+    deformation: NO_DEFORMATION,
+    search: { ...state.search, results },
+    cost: { ...state.cost },
+  };
 }
 
 // --------------------------------------------------------------- worker ----
@@ -361,27 +264,44 @@ function request(text: string, search: SearchDto = state.search, cost: CostDto =
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 let nextId = 1;
 const waiting = new Map<number, (m: FromWorker) => void>();
+let workerQueue = Promise.resolve();
+let workerFailure: string | undefined;
 
 function call(message: ToWorker & { id: number }): Promise<FromWorker> {
-  return new Promise((resolve) => {
+  const job = workerQueue.then(() => new Promise<FromWorker>((resolve) => {
+    if (workerFailure) {
+      resolve({ type: 'error', id: message.id, message: workerFailure });
+      return;
+    }
     waiting.set(message.id, resolve);
     worker.postMessage(message);
-  });
+  }));
+  workerQueue = job.then(() => undefined);
+  return job;
 }
 
 worker.onmessage = (event: MessageEvent<FromWorker>) => {
   const m = event.data;
-  if (m.type === 'status') return setStatus(m.message, true);
+  if (m.type === 'status') return showEngineStatus(m.message);
   if (m.type === 'ready') return onReady(m);
   if ('id' in m && m.id !== undefined && waiting.has(m.id)) {
     waiting.get(m.id)!(m);
     waiting.delete(m.id);
   } else if (m.type === 'error') {
-    setStatus('');
-    showError(m.message);
+    showEngineStatus(m.message, true);
   }
 };
-worker.onerror = (e) => showError(`The engine worker failed: ${e.message}`);
+worker.onerror = (event) => {
+  workerFailure = event.message ? `The engine stopped. ${event.message}` : 'The engine stopped.';
+  if ($('heard-section').hidden) {
+    showEngineStatus(workerFailure, true);
+  } else {
+    setStatus('');
+    showError(workerFailure);
+  }
+  for (const [id, resolve] of waiting) resolve({ type: 'error', id, message: workerFailure });
+  waiting.clear();
+};
 
 // ---------------------------------------------------------------- dom ----
 
@@ -395,18 +315,23 @@ const el = <K extends keyof HTMLElementTagNameMap>(
   node.append(...children);
   return node;
 };
-const SVG = 'http://www.w3.org/2000/svg';
-const svg = (tag: string, attrs: Record<string, string | number>, text?: string): SVGElement => {
-  const node = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
+const lineField = $<HTMLTextAreaElement>('text');
+const lineFieldFrame = lineField.parentElement!;
 
 function setStatus(message: string, busy = false): void {
   const s = $('status');
   s.textContent = message;
   s.classList.toggle('busy', busy);
+  s.hidden = !message;
+}
+
+function showEngineStatus(message: string, error = false): void {
+  const status = $('engine-status');
+  status.textContent = message;
+  status.classList.toggle('sr-only', !error);
+  status.classList.toggle('error', error);
+  status.hidden = !message;
+  if (error && lineField.disabled) lineField.removeAttribute('placeholder');
 }
 function showError(message: string): void {
   const e = $('error');
@@ -414,8 +339,6 @@ function showError(message: string): void {
   e.hidden = !message;
 }
 
-const fmt = (x: number, digits = 2) => x.toFixed(digits);
-const thousands = (x: number) => Math.round(x).toLocaleString('en-US');
 
 /** A knob's ⓘ button, and the technical description it shows and hides. */
 function infoToggle(knob: Knob): { button: HTMLButtonElement; text: HTMLParagraphElement } {
@@ -429,101 +352,83 @@ function infoToggle(knob: Knob): { button: HTMLButtonElement; text: HTMLParagrap
   return { button, text };
 }
 
-/** Builds one knob's controls; `onChange(heavy)` fires on every edit. */
-function knobControl(group: Group, knob: Knob, onChange: () => void): HTMLElement {
+/** Builds one knob's controls; `onChange` fires on every edit. */
+function knobControl(group: Group, knob: Knob, resetValue: unknown, onChange: () => void): HTMLElement {
   const values = groupValues(group);
-  const def = groupDefaults(group)[knob.key];
+  const isFamiliar = group === 'search' && knob.key === 'familiar';
   const wrap = el('div', { className: 'knob' });
   const head = el('div', { className: 'knob-head' });
-  const reset = el('button', { type: 'button', className: 'reset', textContent: 'reset', title: `Default: ${def ?? 'off'}` });
-  const markChanged = () => wrap.classList.toggle('changed', values[knob.key] !== def);
+  const reset = el('button', { type: 'button', className: 'reset', textContent: 'reset', title: `Profile value: ${resetValue ?? 'off'}` });
+  reset.setAttribute('aria-label', `Reset ${knob.label}`);
+  const markChanged = () => wrap.classList.toggle('changed', (values[knob.key] ?? null) !== (resetValue ?? null));
   const info = infoToggle(knob);
   const commit = () => {
     markChanged();
     onChange();
   };
 
-  if (knob.type === 'bool') {
-    const box = el('input', { type: 'checkbox', checked: Boolean(values[knob.key]) });
-    box.addEventListener('change', () => {
-      values[knob.key] = box.checked;
-      commit();
-    });
-    reset.addEventListener('click', () => {
-      values[knob.key] = def;
-      box.checked = Boolean(def);
-      commit();
-    });
-    head.append(el('label', { className: 'name' }, box, ` ${knob.label}`), info.button, reset);
-    wrap.append(head, el('p', { className: 'hint', textContent: knob.hint }), info.text);
-    wrap.dataset.key = knob.key;
-    markChanged();
-    return wrap;
-  }
-
-  const optional = knob.onValue !== undefined;
   const current = values[knob.key] as number | undefined;
   const shown = current ?? knob.onValue ?? knob.min;
   const range = el('input', { type: 'range', min: String(knob.min), max: String(knob.max), step: String(knob.step), value: String(shown) });
   const number = el('input', { type: 'number', min: String(knob.min), step: String(knob.step), value: String(shown) });
-  const box = el('input', { type: 'checkbox', checked: current !== undefined && current !== null, title: 'on / off' });
+  range.setAttribute('aria-label', knob.label);
+  number.setAttribute('aria-label', `${knob.label} value`);
+  const box = knob.onValue === undefined ? undefined : el('input', {
+    type: 'checkbox', checked: current !== undefined && current !== null, title: 'on / off',
+  });
   const setValue = (v: number | undefined, from?: HTMLInputElement) => {
     values[knob.key] = v;
     if (v !== undefined) {
       if (from !== range) range.value = String(v);
       if (from !== number) number.value = String(v);
     }
-    wrap.classList.toggle('off', optional && v === undefined);
+    wrap.classList.toggle('off', box !== undefined && v === undefined);
   };
   const read = (input: HTMLInputElement) => {
     let v = Number(input.value);
     if (!Number.isFinite(v)) return;
     if (knob.step >= 1) v = Math.round(v);
-    if (optional && !box.checked) box.checked = true;
-    setValue(v, input);
+    if (box) box.checked = true;
+    const value = isFamiliar ? familiarWordCount(v) : v;
+    setValue(value, value === v ? input : undefined);
   };
-  // Light knobs follow the slider; heavy ones apply when it is released.
-  range.addEventListener('input', () => {
-    number.value = range.value;
-    if (!knob.heavy) {
-      read(range);
-      commit();
-    }
-  });
-  range.addEventListener('change', () => {
+  const updateRange = () => {
     read(range);
     commit();
-  });
+  };
+  range.addEventListener('input', updateRange);
+  range.addEventListener('change', updateRange);
   number.addEventListener('change', () => {
     read(number);
     commit();
   });
-  box.addEventListener('change', () => {
+  box?.addEventListener('change', () => {
     setValue(box.checked ? Number(number.value) : undefined);
     commit();
   });
   reset.addEventListener('click', () => {
-    const d = def as number | undefined | null;
-    box.checked = d !== undefined && d !== null;
-    setValue(d ?? undefined);
-    if (d === undefined || d === null) {
-      range.value = number.value = String(knob.onValue);
+    const value = (resetValue ?? undefined) as number | undefined;
+    if (box) box.checked = value !== undefined;
+    setValue(value);
+    if (value === undefined) {
+      range.value = number.value = String(knob.onValue ?? knob.min);
     }
     commit();
   });
-  head.append(el('label', { className: 'name' }, ...(optional ? [box, ' '] : []), knob.label), info.button, reset);
+  head.append(el('label', { className: 'name' }, ...(box ? [box, ' '] : []), knob.label), info.button, reset);
   wrap.append(head, el('div', { className: 'knob-inputs' }, range, number), el('p', { className: 'hint', textContent: knob.hint }), info.text);
-  wrap.classList.toggle('off', optional && (current === undefined || current === null));
+  wrap.classList.toggle('off', box !== undefined && (current === undefined || current === null));
   wrap.dataset.key = knob.key;
   markChanged();
   return wrap;
 }
 
-function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement): void {
+function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement, baseline: ProfileSettings): void {
+  const resetValues = groupValues(group, baseline);
   container.replaceChildren(
     ...knobs.map((k) =>
-      knobControl(group, k, () => {
-        if (group === 'lexicon' && !sameLexicon()) setStatus('The lexicon will rebuild on the next run.');
+      knobControl(group, k, resetValues[k.key], () => {
+        renderProfiles();
         changed();
       }),
     ),
@@ -532,78 +437,7 @@ function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement): void 
 
 // -------------------------------------------------------------- results ----
 
-/** A hearing's words, and an ⓘ that shows and hides `details` under them. */
-function hearingItem(text: string, details: string): HTMLLIElement {
-  const info = el('p', { className: 'hearing-info', textContent: details, hidden: true });
-  const button = el('button', { type: 'button', className: 'info-toggle', textContent: 'ⓘ', title: 'Details' });
-  button.setAttribute('aria-expanded', 'false');
-  button.onclick = (event) => {
-    event.stopPropagation(); // not a click on the hearing itself
-    info.hidden = !info.hidden;
-    button.setAttribute('aria-expanded', String(!info.hidden));
-  };
-  return el('li', {}, el('span', { className: 'text', textContent: text }), ' ', button, info);
-}
-
-/** One line's hearings, its stats and its alignment grid, which
- * highlights the hearing last clicked. */
-function lineBlock(line: string, result: ResultDto, ms: number, rebuildMs: number, several: boolean): HTMLElement {
-  const mishear = result.words.length > 0;
-  let selected = 0;
-  const grid = el('div', { className: 'alignment' });
-  const list = el('ol', { className: 'hearings' });
-  list.replaceChildren(
-    ...result.hearings.map((h, i) => {
-      const li = hearingItem(
-        h.text,
-        [
-          `cost ${fmt(h.cost)}`,
-          `sound ${fmt(h.phonetic)}`,
-          ...(mishear ? [`${h.shared} same word`, `${h.related} same root`] : []),
-          ...(i > 0 ? [`${h.reused} reused`] : []),
-          ...(result.boundaries.length ? [`crosses ${result.boundaries.length - h.kept} of ${result.boundaries.length} boundaries`] : []),
-        ].join(' · '),
-      );
-      li.classList.toggle('selected', i === selected);
-      li.onclick = () => {
-        selected = i;
-        list.querySelectorAll('li').forEach((x, k) => x.classList.toggle('selected', k === i));
-        grid.querySelectorAll<HTMLElement>('.chip').forEach((c) => c.classList.toggle('selected', c.dataset.row === String(i)));
-      };
-      return li;
-    }),
-  );
-  if (!result.hearings.length) list.append(el('li', { className: 'hint', textContent: 'Nothing within the bound. Raise “max bound”.' }));
-  const s = result.stats;
-  const stats = [
-    `${result.hearings.length} in ${thousands(ms)} ms`,
-    rebuildMs ? `(lexicon rebuilt in ${thousands(rebuildMs)} ms)` : '',
-    `bound ${fmt(s.bound, 1)} after ${s.rounds} round${s.rounds === 1 ? '' : 's'}`,
-    `${thousands(s.nodes)} trie nodes`,
-    `${thousands(s.edges)} edges`,
-  ];
-  renderAlignment(grid, result, selected);
-  const alignment = el(
-    'details',
-    { className: 'alignment-block', open: alignmentOpen },
-    el('summary', { textContent: 'Alignment' }),
-    el('div', { className: 'alignment-scroll' }, grid),
-    el('p', { className: 'hint', textContent: stats.filter(Boolean).join(' · ') }),
-  );
-  alignment.addEventListener('toggle', () => (alignmentOpen = alignment.open));
-  return el(
-    'section',
-    { className: 'heard-line' },
-    ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
-    list,
-    alignment,
-  );
-}
-
-/** Whether alignments start open: the last one toggled sets it. */
-let alignmentOpen = true;
-
-function renderAlignment(grid: HTMLElement, result: ResultDto, selected: number): void {
+function renderAlignment(grid: HTMLElement, result: LineResult, heard: LineHearing['words']): void {
   const n = result.input.length;
   grid.style.gridTemplateColumns = `auto repeat(${n}, max-content)`;
   const cells: HTMLElement[] = [];
@@ -618,119 +452,34 @@ function renderAlignment(grid: HTMLElement, result: ResultDto, selected: number)
     node.style.gridColumn = `${from + 2} / ${Math.max(to, from + 1) + 2}`;
     cells.push(node);
   };
-  let row = 1;
-  if (result.words.length) {
-    label('line', row);
-    let at = 0;
-    for (const w of result.words) {
-      if (w.deformed.length) place(el('div', { className: 'orig-word', textContent: w.text }), row, at, at + w.deformed.length);
-      at += w.deformed.length;
-    }
-    row++;
+  label('Line', 1);
+  let at = 0;
+  for (const word of result.words) {
+    const end = at + word.deformed.length;
+    if (end > at) place(el('div', { className: 'orig-word', textContent: word.text }), 1, at, end);
+    at = end;
   }
-  label(result.words.length ? 'sounds' : 'input', row);
-  result.input.forEach((ph, k) => place(el('div', { className: 'input ph', textContent: ph }), row, k, k + 1));
-  row++;
-  const lineWords = new Set(result.words.map((w) => w.text));
-  const firstHearingRow = row;
-  result.hearings.forEach((h, i) => {
-    label(`${i + 1}`, row);
-    for (const w of h.words) {
-      const chip = el('div', {
-        className: `chip${lineWords.has(w.text) ? ' shared' : ''}${i === selected ? ' selected' : ''}`,
-        textContent: w.text,
-        title: result.input.slice(w.start, w.end).join(' '),
-      });
-      chip.dataset.row = String(i);
-      place(chip, row, w.start, w.end);
-    }
-    row++;
-  });
-  // The line's word boundaries, drawn over the hearings: a heard word they
-  // pass through cuts across one.
-  for (const b of result.boundaries) {
-    const line = el('div', { className: 'boundary' });
-    line.style.gridRow = `1 / ${Math.max(row, firstHearingRow + 1)}`;
-    line.style.gridColumn = String(b + 2);
-    cells.push(line);
+
+  label('Sounds', 2);
+  result.input.forEach((ph, k) => place(el('div', { className: 'input ph', textContent: ph }), 2, k, k + 1));
+
+  label('Misheard', 3);
+  const lineWords = new Set(result.words.map((word) => word.text));
+  for (const word of heard) {
+    const chip = el('div', {
+      className: lineWords.has(word.text) ? 'chip shared' : 'chip',
+      textContent: word.text,
+      title: result.input.slice(word.start, word.end).join(' '),
+    });
+    place(chip, 3, word.start, word.end);
+  }
+  for (const boundary of result.boundaries) {
+    const marker = el('div', { className: 'boundary' });
+    marker.style.gridRow = '1 / 4';
+    marker.style.gridColumn = String(boundary + 2);
+    cells.push(marker);
   }
   grid.replaceChildren(...cells);
-}
-
-// ---------------------------------------------------------------- sweep ----
-
-function sweepKnobs(): { id: string; label: string; apply: (s: State, v: number) => void }[] {
-  const numbered = (group: 'search' | 'cost', knobs: Knob[]) =>
-    knobs
-      .filter((k): k is NumberKnob => k.type === 'number')
-      .map((k) => ({
-        id: `${group}.${k.key}`,
-        label: `${group}: ${k.label}`,
-        apply: (s: State, v: number) => {
-          (s[group] as unknown as Record<string, number>)[k.key] = v;
-        },
-      }));
-  return [
-    ...numbered('search', SEARCH_KNOBS),
-    ...numbered('cost', COST_KNOBS),
-  ];
-}
-
-function renderSweepControls(): void {
-  const select = $<HTMLSelectElement>('sweep-knob');
-  select.replaceChildren(...sweepKnobs().map((k) => el('option', { value: k.id, textContent: k.label, selected: k.id === state.sweepKnob })));
-  select.onchange = () => {
-    state.sweepKnob = select.value;
-    saveState();
-  };
-  const values = $<HTMLInputElement>('sweep-values');
-  values.value = state.sweepValues;
-  values.onchange = () => {
-    state.sweepValues = values.value;
-    saveState();
-  };
-  $('sweep-run').onclick = runSweep;
-}
-
-async function runSweep(): Promise<void> {
-  const knob = sweepKnobs().find((k) => k.id === state.sweepKnob);
-  const values = state.sweepValues
-    .split(/[,\s]+/)
-    .filter(Boolean)
-    .map(Number)
-    .filter(Number.isFinite);
-  if (!knob || !values.length) return;
-  const section = $('sweep-section');
-  section.hidden = false;
-  $('sweep-title').textContent = `Sweep: ${knob.label}`;
-  const columns = values.map((v) => el('div', { className: 'column' }, el('h4', { textContent: `${v}` }), el('p', { className: 'hint', textContent: '…' })));
-  $('sweep').replaceChildren(...columns);
-  section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  for (const [k, v] of values.entries()) {
-    setStatus(`Sweep ${k + 1} of ${values.length}…`, true);
-    const s: State = structuredClone(state);
-    knob.apply(s, v);
-    const saved = state;
-    state = s;
-    const req = request(inputLines()[0] ?? '');
-    state = saved;
-    const reply = await call({ type: 'run', id: nextId++, lexicon: s.lexicon, request: req });
-    const column = columns[k];
-    if (reply.type === 'error') {
-      column.replaceChildren(column.firstChild!, el('p', { className: 'error', textContent: reply.message }));
-    } else if (reply.type === 'result') {
-      column.replaceChildren(
-        column.firstChild!,
-        el(
-          'ol',
-          {},
-          ...reply.result.hearings.map((h) => el('li', {}, h.text, el('span', { className: 'cost', textContent: fmt(h.cost) }))),
-        ),
-        el('p', { className: 'hint', textContent: `${thousands(reply.ms)} ms` }),
-      );
-    }
-  }
-  setStatus('');
 }
 
 // ------------------------------------------------------------ profiles ----
@@ -740,14 +489,19 @@ async function runSweep(): Promise<void> {
 interface Profile {
   search: Partial<Omit<SearchDto, 'familiar'>> & { familiar?: number | null };
   cost: Partial<Omit<CostDto, 'swap'>> & { swap?: number | null };
-  lexicon: Partial<LexiconOptions>;
 }
 
-type ProfileSettings = Pick<State, 'search' | 'cost' | 'lexicon'>;
+type ProfileSettings = Pick<State, 'search' | 'cost'>;
+const BASE_PROFILE = 'base';
+const BUILTIN_PROFILES: Record<string, Profile> = Object.fromEntries(defaultProfiles.map(({ name, ...profile }) => [name, profile]));
 const PROFILES_KEY = 'mishear-web-profiles-v1';
-const DEFAULT_PROFILES_KEY = 'mishear-web-default-profiles-v1';
+const profileMenus = [$<HTMLSelectElement>('profile'), $<HTMLSelectElement>('advanced-profile')];
 
-function readProfiles(): Record<string, Profile> {
+function isBuiltIn(name: string): boolean {
+  return Object.hasOwn(BUILTIN_PROFILES, name);
+}
+
+function readCustomProfiles(): Record<string, Profile> {
   try {
     return Object.assign(Object.create(null), JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}'));
   } catch {
@@ -755,87 +509,58 @@ function readProfiles(): Record<string, Profile> {
   }
 }
 
-/** Writes the profiles, and their order (see [`profileOrder`]). */
-function writeProfiles(profiles: Record<string, Profile>, order: string[] = profileOrder(profiles)): void {
-  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
-  writeOrder(order.filter((name) => name in profiles));
+function readProfiles(): Record<string, Profile> {
+  return Object.assign(readCustomProfiles(), BUILTIN_PROFILES);
 }
 
-const PROFILE_ORDER_KEY = 'mishear-web-profile-order-v1';
+function writeProfiles(profiles: Record<string, Profile>): void {
+  const custom = Object.fromEntries(Object.entries(profiles).filter(([name]) => !isBuiltIn(name)));
+  localStorage.setItem(PROFILES_KEY, JSON.stringify(custom));
+}
 
-/** The profiles' names in the order chosen for them: the stored order, then
- * any profile it doesn't name yet, alphabetically. (Kept apart from the
- * profiles, since an object's keys don't keep every order: "2" sorts
- * first.) */
-function profileOrder(profiles: Record<string, Profile> = readProfiles()): string[] {
-  let stored: string[] = [];
-  try {
-    stored = JSON.parse(localStorage.getItem(PROFILE_ORDER_KEY) ?? '[]');
-  } catch {
-    /* none */
+/** Bundled names in their defined order, followed by custom names alphabetically. */
+function profileNames(profiles: Record<string, Profile>): string[] {
+  const custom = Object.keys(profiles).filter((name) => !isBuiltIn(name)).sort((a, b) => a.localeCompare(b));
+  return [...Object.keys(BUILTIN_PROFILES), ...custom];
+}
+
+/** Preserves edits saved under a bundled name before those profiles became read-only. */
+function migrateBundledProfiles(): void {
+  const profiles = readCustomProfiles();
+  const bundled = Object.keys(profiles).filter(isBuiltIn);
+  if (!bundled.length) return;
+  const active = state.profile;
+  for (const name of bundled) {
+    const profile = profiles[name];
+    if (!sameSettings(fullProfile(profile), fullProfile(BUILTIN_PROFILES[name]))) {
+      const label = `${name} (saved)`;
+      let copy = label;
+      for (let n = 2; copy in profiles; n++) copy = `${label} ${n}`;
+      profiles[copy] = profile;
+      if (active === name && sameSettings(state, fullProfile(profile))) state.profile = copy;
+    }
+    delete profiles[name];
   }
-  const known = stored.filter((name, i) => name in profiles && stored.indexOf(name) === i);
-  const rest = Object.keys(profiles)
-    .filter((name) => !known.includes(name))
-    .sort((a, b) => a.localeCompare(b));
-  return [...known, ...rest];
-}
-
-function writeOrder(order: string[]): void {
-  localStorage.setItem(PROFILE_ORDER_KEY, JSON.stringify(order));
-}
-
-/** Add the bundled profiles once, preserving existing names and order. */
-function seedDefaultProfiles(): void {
-  if (localStorage.getItem(DEFAULT_PROFILES_KEY)) return;
-  const profiles = readProfiles();
-  const order = profileOrder(profiles);
-  for (const { name, ...profile } of defaultProfiles) {
-    if (name in profiles) continue;
-    profiles[name] = profile;
-    order.push(name);
-  }
-  writeProfiles(profiles, order);
-  localStorage.setItem(DEFAULT_PROFILES_KEY, '1');
+  writeProfiles(profiles);
+  if (state.profile !== active && !location.hash) saveState();
 }
 
 /** Store the profile knobs. A null preserves an explicit "off". */
-function savedProfile({ search, cost, lexicon }: ProfileSettings): Profile {
-  const { results, within, familiar, ...knobs } = search;
+function savedProfile({ search, cost }: ProfileSettings): Profile {
   return {
-    search: { ...knobs, familiar: familiar ?? null },
+    search: editableSearch(search),
     cost: { ...cost, swap: cost.swap ?? null },
-    lexicon: { ...lexicon },
   };
 }
 
-/** A profile over the current defaults: knobs added since it was saved
- * take their defaults. "results" is always the current one. */
+/** A profile over the engine defaults, including knobs added since it was saved. */
 function fullProfile(p: Profile): ProfileSettings {
-  const { familiar = defaults.search.familiar, ...search } = p.search;
+  const { familiar, ...search } = editableSearch(p.search);
   const { swap = defaults.cost.swap, ...cost } = p.cost;
   return {
-    search: { ...defaults.search, ...search, familiar: familiar ?? undefined, within: defaults.search.within, results: state.search.results },
+    search: { ...defaults.search, ...search, familiar: familiarWordCount(familiar) },
     cost: { ...defaults.cost, ...cost, swap: swap ?? undefined },
-    lexicon: { ...defaults.lexicon, ...withoutWordLists(p.lexicon ?? {}) },
   };
-}
-
-function exportProfiles(): void {
-  const profiles = readProfiles();
-  const exported = profileOrder(profiles).map((name) => ({
-    name,
-    ...savedProfile(fullProfile(profiles[name])),
-  }));
-  if (!exported.length) return;
-  const blob = new Blob([JSON.stringify(exported, null, 2) + '\n'], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = el('a', { href: url, download: 'mishear-profiles.json' });
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  setStatus(`Exported ${exported.length} ${exported.length === 1 ? 'profile' : 'profiles'}.`);
 }
 
 function sameValues(a: object, b: object): boolean {
@@ -844,75 +569,53 @@ function sameValues(a: object, b: object): boolean {
   return [...new Set([...Object.keys(x), ...Object.keys(y)])].every((k) => (x[k] ?? null) === (y[k] ?? null));
 }
 
-/** Whether the knobs hold the profile's values. */
-function holds(p: Profile): boolean {
-  const full = fullProfile(p);
-  return sameValues(state.search, full.search) && sameValues(state.cost, full.cost) && sameValues(state.lexicon, full.lexicon);
+function sameSettings(a: ProfileSettings, b: ProfileSettings): boolean {
+  return sameValues(a.search, b.search) && sameValues(a.cost, b.cost);
 }
 
-/** The profile menu, marking the active profile "(edited)" once the knobs
+/** The profile menus, marking the active profile "(edited)" once the knobs
  * leave its values, and the buttons that apply to it. */
-function renderProfiles(): void {
+function renderProfiles(): ProfileSettings {
   const profiles = readProfiles();
   if (state.profile !== undefined && !(state.profile in profiles)) state.profile = undefined;
   const active = state.profile;
-  const edited = active !== undefined && !holds(profiles[active]);
-  const names = profileOrder(profiles);
-  $<HTMLSelectElement>('profile').replaceChildren(
-    el('option', { value: '', textContent: names.length ? '(no profile)' : '(no profiles yet)', selected: active === undefined }),
-    ...names.map((name) => el('option', { value: name, textContent: name === active && edited ? `${name} (edited)` : name, selected: name === active })),
-  );
-  $<HTMLButtonElement>('profile-save').disabled = active === undefined || !edited;
-  $<HTMLButtonElement>('profile-rename').disabled = active === undefined;
-  $<HTMLButtonElement>('profile-up').disabled = active === undefined || names.indexOf(active) <= 0;
-  $<HTMLButtonElement>('profile-down').disabled = active === undefined || names.indexOf(active) >= names.length - 1;
-  $<HTMLButtonElement>('profile-delete').disabled = active === undefined;
-  $<HTMLButtonElement>('profile-export').disabled = names.length === 0;
-
-  state.compare = (state.compare ?? []).filter((name) => name in profiles);
-  const compare = $('profile-compare');
-  compare.hidden = names.length === 0;
-  compare.replaceChildren(
-    el('span', { textContent: 'Show together:' }),
-    ...names.map((name) => {
-      const box = el('input', { type: 'checkbox', checked: state.compare!.includes(name) });
-      box.onchange = () => {
-        state.compare = box.checked ? [...state.compare!, name] : state.compare!.filter((n) => n !== name);
-        changed();
-      };
-      return el('label', {}, box, ` ${name}`);
-    }),
-  );
-}
-
-/** One way to hear the lines: the current knobs, or a profile's values. */
-interface Setting extends ProfileSettings {
-  label: string;
-}
-
-/** The current knobs, then each profile shown together with them (one
- * the knobs already hold counts once). */
-function settings(): Setting[] {
-  const profiles = readProfiles();
-  const active = state.profile !== undefined && state.profile in profiles && holds(profiles[state.profile]) ? state.profile : undefined;
-  const out: Setting[] = [{ label: active ?? 'current knobs', search: state.search, cost: state.cost, lexicon: state.lexicon }];
-  for (const name of profileOrder(profiles)) {
-    if (name === active || !(state.compare ?? []).includes(name)) continue;
-    out.push({ label: name, ...fullProfile(profiles[name]) });
+  const baseline = fullProfile(profiles[active ?? BASE_PROFILE]);
+  const edited = active !== undefined && !sameSettings(state, baseline);
+  const canEdit = active !== undefined && !isBuiltIn(active);
+  const names = profileNames(profiles);
+  const selected = active !== undefined && !edited ? active : '';
+  for (const menu of profileMenus) {
+    // An option must stay mounted through change so the native picker can close.
+    const existing = [...menu.options].filter((option) => option.value);
+    if (existing.length !== names.length || names.some((name, index) => existing[index].value !== name)) {
+      menu.replaceChildren(...names.map((name) => el('option', { value: name, textContent: name })));
+    }
+    const placeholder = menu.querySelector<HTMLOptionElement>('option[value=""]');
+    if (selected) {
+      placeholder?.remove();
+    } else {
+      const label = active === undefined ? 'Custom settings' : `${active} (edited)`;
+      if (placeholder) placeholder.textContent = label;
+      else menu.prepend(el('option', { value: '', textContent: label, disabled: true }));
+    }
+    if (menu.value !== selected) menu.value = selected;
   }
-  return out;
+  $<HTMLButtonElement>('profile-save').disabled = !canEdit || !edited;
+  $<HTMLButtonElement>('profile-rename').disabled = !canEdit;
+  $<HTMLButtonElement>('profile-delete').disabled = !canEdit;
+  return baseline;
 }
 
 /** Sets the knobs to the profile's values. */
 function applyProfile(name: string): void {
-  const p = fullProfile(readProfiles()[name]);
+  const profiles = readProfiles();
+  const selected = name in profiles ? name : BASE_PROFILE;
+  const p = fullProfile(profiles[selected]);
   state.search = p.search;
   state.cost = p.cost;
-  state.lexicon = p.lexicon;
-  state.profile = name;
-  renderAll();
+  state.profile = selected;
+  renderSettings();
   changed();
-  setStatus(`Applied “${name}”.`);
 }
 
 /** Asks for a profile name, `suggested` filled in; `null` if cancelled or
@@ -920,27 +623,27 @@ function applyProfile(name: string): void {
 function askName(question: string, suggested: string, unless?: string): string | null {
   const name = prompt(question, suggested)?.trim();
   if (!name) return null;
+  if (isBuiltIn(name)) {
+    $('settings-status').textContent = `“${name}” is a built-in profile. Choose another name.`;
+    return null;
+  }
   if (name !== unless && name in readProfiles() && !confirm(`Replace the profile “${name}”?`)) return null;
   return name;
 }
 
 function wireProfiles(): void {
-  const select = $<HTMLSelectElement>('profile');
-  select.onchange = () => {
-    if (select.value) applyProfile(select.value);
-    else {
-      state.profile = undefined;
-      saveState();
-      renderProfiles();
-    }
-  };
+  for (const menu of profileMenus) {
+    menu.onchange = () => {
+      if (menu.value) applyProfile(menu.value);
+    };
+  }
   $('profile-save').onclick = () => {
-    if (state.profile === undefined) return;
+    if (state.profile === undefined || isBuiltIn(state.profile)) return;
     const profiles = readProfiles();
     profiles[state.profile] = savedProfile(state);
     writeProfiles(profiles);
-    renderProfiles();
-    setStatus(`Saved “${state.profile}”.`);
+    renderSettings();
+    $('settings-status').textContent = `Saved “${state.profile}”.`;
   };
   $('profile-save-as').onclick = () => {
     const name = askName('Save these knobs as a profile named:', state.profile ? `${state.profile} 2` : '');
@@ -950,212 +653,278 @@ function wireProfiles(): void {
     writeProfiles(profiles);
     state.profile = name;
     saveState();
-    renderProfiles();
-    setStatus(`Saved “${name}”.`);
+    renderSettings();
+    $('settings-status').textContent = `Saved “${name}”.`;
   };
   $('profile-rename').onclick = () => {
     const old = state.profile;
-    if (old === undefined) return;
+    if (old === undefined || isBuiltIn(old)) return;
     const name = askName(`Rename “${old}” to:`, old, old);
     if (name === null || name === old) return;
     const profiles = readProfiles();
-    const order = profileOrder(profiles).map((n) => (n === old ? name : n));
     profiles[name] = profiles[old];
     delete profiles[old];
-    writeProfiles(profiles, order);
+    writeProfiles(profiles);
     state.profile = name;
-    state.compare = (state.compare ?? []).map((n) => (n === old ? name : n));
     saveState();
     renderProfiles();
   };
-  // Moves the chosen profile one place up (-1) or down (1).
-  const move = (by: number) => {
-    const name = state.profile;
-    if (name === undefined) return;
-    const order = profileOrder();
-    const at = order.indexOf(name);
-    const to = at + by;
-    if (at < 0 || to < 0 || to >= order.length) return;
-    [order[at], order[to]] = [order[to], order[at]];
-    writeOrder(order);
-    // Profiles shown together are heard in this order too.
-    if (state.compare?.length) changed();
-    else renderProfiles();
-  };
-  $('profile-up').onclick = () => move(-1);
-  $('profile-down').onclick = () => move(1);
-  $('profile-export').onclick = exportProfiles;
   $('profile-delete').onclick = () => {
     const name = state.profile;
-    if (name === undefined || !confirm(`Delete the profile “${name}”? The knobs keep their values.`)) return;
+    if (name === undefined || isBuiltIn(name) || !confirm(`Delete the profile “${name}”? The knobs keep their values.`)) return;
     const profiles = readProfiles();
     delete profiles[name];
     writeProfiles(profiles);
     state.profile = undefined;
     saveState();
-    renderProfiles();
+    renderSettings();
   };
 }
 
 // ------------------------------------------------------------- running ----
 
-let lastLexicon: LexiconOptions | null = null;
-const sameLexicon = () => same(state.lexicon, lastLexicon);
+const DEBOUNCE_MS = 350;
+const LINE_CHOICES = 5;
+
+interface DisplayedHearing {
+  result: LineResult;
+  words: LineHearing['words'];
+  elapsedMs: number;
+  lineChoices?: { hearings: LineHearing[]; elapsedMs: number };
+  lineIndex: number;
+  wordCycle?: { excluded: PronunciationExclusionDto[]; elapsedMs: number };
+  cycling: boolean;
+}
+
+let displayed: DisplayedHearing | undefined;
+let revision = 0;
 let timer: number | undefined;
-let running = false;
-let rerun = false;
+let hearing = false;
+let queued = false;
+let copyAttempt = 0;
+let copyFeedbackTimer: number | undefined;
 
 function changed(): void {
+  state.text = lineField.value;
   saveState();
-  renderProfiles();
-  if (history.replaceState && location.hash) history.replaceState(null, '', location.pathname);
-  if (state.autoRun) {
-    clearTimeout(timer);
-    timer = window.setTimeout(run, 250);
-  }
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  revision++;
+  clearTimeout(timer);
+  queued = false;
+  displayed = undefined;
+  $('announcement').textContent = '';
+  showError('');
+  renderHearing();
+  const hasText = Boolean(state.text.trim());
+  setStatus(hasText ? 'Finding a mishearing…' : '', hasText);
+  if (hasText) timer = window.setTimeout(hearLine, DEBOUNCE_MS);
 }
 
-async function run(): Promise<void> {
-  clearTimeout(timer);
-  if (running) {
-    rerun = true;
+async function hearLine(): Promise<void> {
+  if (hearing) {
+    queued = true;
     return;
   }
-  running = true;
-  do {
-    rerun = false;
-    const lines = inputLines();
-    if (!lines.length) break;
-    if (state.compare?.length) await runTogether(lines);
-    else await runAlone(lines);
-  } while (rerun);
-  running = false;
-}
-
-/** Hears each line under the current knobs, with its full results. */
-async function runAlone(lines: string[]): Promise<void> {
-  const blocks: HTMLElement[] = [];
-  let total = 0;
-  let notice: string | undefined;
-  showError('');
-  for (const [k, line] of lines.entries()) {
-    const what = lines.length > 1 ? `line ${k + 1} of ${lines.length}` : '';
-    setStatus(sameLexicon() ? `Hearing${what ? ` ${what}` : ''}…` : 'Rebuilding the lexicon, then hearing…', true);
-    const lexicon = structuredClone(state.lexicon);
-    const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line)) });
-    if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
-    if (rerun) return; // Stale: the input or knobs moved while it ran.
+  const line = state.text.trim();
+  if (!line) return;
+  hearing = true;
+  const atRevision = revision;
+  try {
+    const reply = await call({ type: 'run', id: nextId++, request: request(line, 1) });
+    if (revision !== atRevision) return;
+    setStatus('');
     if (reply.type === 'error') {
-      setStatus('');
-      showError(lines.length > 1 ? `Line ${k + 1}: ${reply.message}` : reply.message);
+      showError(reply.message);
       return;
     }
-    if (reply.type !== 'result') continue;
-    lexiconInfo = reply.info;
-    engineMemoryMb = reply.memoryMb;
-    notice = reply.notice ?? notice;
-    total += reply.ms + reply.rebuildMs;
-    blocks.push(lineBlock(line, reply.result, reply.ms, reply.rebuildMs, lines.length > 1));
-    // Each line shows as soon as it's heard.
-    $('heard-section').hidden = false;
-    $('heard-lines').replaceChildren(...blocks);
-  }
-  renderLexiconInfo();
-  const heard = lines.length > 1 ? `Heard ${lines.length} lines in ${thousands(total)} ms` : `Heard in ${thousands(total)} ms`;
-  setStatus(notice ? `${heard}. ${notice}` : heard);
-}
-
-/** Hears each line under the current knobs and every profile shown
- * together, one column each. Settings sharing a lexicon run back to back,
- * so the worker rebuilds it as few times as it can. */
-async function runTogether(lines: string[]): Promise<void> {
-  const columns = settings();
-  const cells: (ResultDto | string | null)[][] = lines.map(() => columns.map(() => null));
-  const show = () => {
-    $('heard-section').hidden = false;
-    $('heard-lines').replaceChildren(...lines.map((line, k) => togetherBlock(line, columns, cells[k], lines.length > 1)));
-  };
-  show();
-  showError('');
-  const key = (c: Setting) => JSON.stringify(c.lexicon);
-  const loaded = lastLexicon ? JSON.stringify(lastLexicon) : '';
-  const order = columns.map((_, i) => i).sort((a, b) => Number(key(columns[b]) === loaded) - Number(key(columns[a]) === loaded) || key(columns[a]).localeCompare(key(columns[b])));
-  let total = 0;
-  let done = 0;
-  for (const i of order) {
-    const column = columns[i];
-    for (const [k, line] of lines.entries()) {
-      setStatus(`Hearing ${++done} of ${lines.length * columns.length}…`, true);
-      const lexicon = structuredClone(column.lexicon);
-      const reply = await call({ type: 'run', id: nextId++, lexicon, request: structuredClone(request(line, column.search, column.cost)) });
-      if (reply.type === 'result' || reply.type === 'error') lastLexicon = lexicon;
-      if (rerun) return;
-      if (reply.type === 'result') {
-        cells[k][i] = reply.result;
-        total += reply.ms + reply.rebuildMs;
-        lexiconInfo = reply.info;
-        engineMemoryMb = reply.memoryMb;
-      } else if (reply.type === 'error') {
-        cells[k][i] = reply.message;
-      }
-      show();
+    if (reply.type !== 'result') return;
+    const first = reply.result.hearings[0];
+    if (!first) {
+      setStatus('No mishearing found.');
+      return;
+    }
+    displayed = {
+      result: reply.result,
+      words: first.words,
+      elapsedMs: reply.elapsedMs,
+      lineIndex: 0,
+      cycling: false,
+    };
+    renderHearing();
+  } finally {
+    hearing = false;
+    if (queued) {
+      queued = false;
+      void hearLine();
     }
   }
-  renderLexiconInfo();
-  const lineCount = lines.length > 1 ? `${lines.length} lines` : 'the line';
-  setStatus(`Heard ${lineCount} under ${columns.length} settings in ${thousands(total)} ms`);
 }
 
-/** One line's hearings under each setting, one under another. */
-function togetherBlock(line: string, columns: Setting[], cells: (ResultDto | string | null)[], several: boolean): HTMLElement {
-  const column = (c: Setting, cell: ResultDto | string | null) => {
-    const body =
-      cell === null
-        ? el('p', { className: 'hint', textContent: '…' })
-        : typeof cell === 'string'
-          ? el('p', { className: 'error', textContent: cell })
-          : el(
-              'ol',
-              { className: 'hearings' },
-              ...cell.hearings.map((h) => hearingItem(h.text, `cost ${fmt(h.cost)} · sound ${fmt(h.phonetic)}`)),
-            );
-    return el('div', { className: 'together-row' }, el('h4', { textContent: c.label }), body);
-  };
-  return el(
-    'section',
-    { className: 'heard-line' },
-    ...(several ? [el('h3', { className: 'line-text', textContent: line })] : []),
-    el('div', { className: 'together' }, ...columns.map((c, i) => column(c, cells[i]))),
-  );
+function sizeText(element: HTMLElement, text: string, largest: number): void {
+  const fraction = Math.max(0, Math.min(1, (text.trim().length - 12) / 168));
+  const factor = (1 - fraction) ** 1.6;
+  element.style.setProperty('--type-growth', String((largest - 1) * factor));
 }
 
-let engineMemoryMb = 0;
+function renderHearing(): void {
+  $('heard-section').hidden = !state.text.trim();
+  copyAttempt++;
+  resetCopyFeedback();
+  $<HTMLButtonElement>('copy-result').disabled = !displayed;
+  const words = $('heard-words');
+  const focusedWord = words.contains(document.activeElement)
+    ? (document.activeElement as HTMLButtonElement).dataset.index
+    : undefined;
+  $<HTMLButtonElement>('cycle-line').disabled =
+    !displayed || (displayed.lineChoices?.hearings.length === 1 && !displayed.wordCycle);
+  words.hidden = !displayed;
+  $('alignment-block').hidden = !displayed;
+  const generationTime = $('generation-time');
+  generationTime.hidden = !displayed;
+  if (!displayed) {
+    words.replaceChildren();
+    $('alignment').replaceChildren();
+    return;
+  }
+  const { result, words: heard } = displayed;
+  const alternatives = displayed.lineIndex > 0 && !displayed.wordCycle ? displayed.lineChoices : undefined;
+  const elapsed = Math.round(displayed.wordCycle?.elapsedMs ?? alternatives?.elapsedMs ?? displayed.elapsedMs).toLocaleString();
+  generationTime.textContent = `generated in ${elapsed} ms`;
+  sizeText(words, heard.map((word) => word.text).join(' '), 4.25);
+  words.replaceChildren(...heard.flatMap((word, index) => {
+    const button = el('button', { type: 'button', className: 'heard-word', textContent: word.text });
+    button.title = 'find another word';
+    button.setAttribute('aria-label', `Cycle ${word.text}`);
+    button.dataset.index = String(index);
+    button.onclick = () => cycleWord(index);
+    return index === 0 ? [button] : [' ', button];
+  }));
+  if (focusedWord !== undefined) {
+    const index = Math.min(Number(focusedWord), heard.length - 1);
+    words.querySelector<HTMLButtonElement>(`[data-index="${index}"]`)?.focus();
+  }
+  renderAlignment($('alignment'), result, heard);
+}
 
-function renderLexiconInfo(): void {
-  if (!lexiconInfo) return;
-  const i = lexiconInfo;
-  $('lexicon-info').textContent =
-    `${thousands(i.words)} words, ${thousands(i.trie_nodes)} trie nodes; ${i.bigrams ? `${thousands(i.bigram_pairs)} word pairs loaded` : 'word-pair counts not loaded'}` +
-    (engineMemoryMb ? `; engine memory ${Math.round(engineMemoryMb)} MB.` : '.');
+async function cycleLine(): Promise<void> {
+  const model = displayed;
+  if (!model || model.cycling) return;
+  if (!model.lineChoices) {
+    model.cycling = true;
+    setStatus('Finding other lines…', true);
+    const reply = await call({
+      type: 'run', id: nextId++, request: request(state.text.trim(), LINE_CHOICES),
+    });
+    model.cycling = false;
+    if (displayed !== model) return;
+    if (reply.type === 'error') {
+      setStatus(reply.message);
+      return;
+    }
+    if (reply.type !== 'result') return;
+    const first = model.result.hearings[0];
+    const seen = new Set([first.text]);
+    const rest = reply.result.hearings.filter(({ text }) => {
+      if (seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    });
+    model.lineChoices = { hearings: [first, ...rest], elapsedMs: reply.elapsedMs };
+  }
+  const choices = model.lineChoices.hearings;
+  if (choices.length < 2 && !model.wordCycle) {
+    renderHearing();
+    setStatus('No other line found.');
+    return;
+  }
+  model.lineIndex = (model.lineIndex + 1) % choices.length;
+  model.words = choices[model.lineIndex].words;
+  model.wordCycle = undefined;
+  renderHearing();
+  announce(model.words.map((word) => word.text).join(' '));
+}
+
+async function cycleWord(index: number): Promise<void> {
+  const model = displayed;
+  if (!model || model.cycling) return;
+  const { text: word, start, end, pronunciation } = model.words[index];
+  const prior = model.wordCycle?.excluded.filter((x) => x.start < end && start < x.end) ?? [];
+  const excluded = [...prior, { start, end, pronunciation, word }];
+  const previousText = model.words.map((word) => word.text).join(' ');
+  const line = state.text.trim();
+  const search = (count: number) => call({
+    type: 'run',
+    id: nextId++,
+    request: { ...request(line, count), excluded_pronunciations: excluded },
+  });
+  model.cycling = true;
+  setStatus('Rehearing the line…', true);
+  let reply = await search(1);
+  let retryMs = 0;
+  if (displayed === model && reply.type === 'result' && reply.result.hearings[0]?.text === previousText) {
+    retryMs = reply.elapsedMs;
+    reply = await search(LINE_CHOICES);
+  }
+  model.cycling = false;
+  if (displayed !== model) return;
+  if (reply.type === 'error') {
+    setStatus(reply.message);
+    return;
+  }
+  if (reply.type !== 'result') return;
+  const next = reply.result.hearings.find((hearing) => hearing.text !== previousText);
+  if (!next) {
+    setStatus(`No other mishearing found without “${word}” there.`);
+    return;
+  }
+  model.words = next.words;
+  model.wordCycle = { excluded, elapsedMs: retryMs + reply.elapsedMs };
+  renderHearing();
+  announce(next.text);
+}
+
+function announce(message: string): void {
+  setStatus('');
+  $('announcement').textContent = message;
+}
+
+function resetCopyFeedback(): void {
+  clearTimeout(copyFeedbackTimer);
+  $('copy-result').classList.remove('copied');
+  $('copy-fallback').hidden = true;
+}
+
+async function copyResult(): Promise<void> {
+  if (!displayed) return;
+  const text = displayed.words.map((word) => word.text).join(' ');
+  const attempt = ++copyAttempt;
+  const copied = await copyText(text);
+  if (attempt !== copyAttempt) return;
+  resetCopyFeedback();
+  if (copied) {
+    $('copy-result').classList.add('copied');
+    $('announcement').textContent = 'Misheard text copied.';
+    copyFeedbackTimer = window.setTimeout(resetCopyFeedback, 1600);
+    return;
+  }
+  const field = $<HTMLTextAreaElement>('copy-fallback-text');
+  field.value = text;
+  $('copy-fallback').hidden = false;
+  field.focus();
+  field.select();
 }
 
 // ---------------------------------------------------------------- setup ----
 
 function renderInput(): void {
-  const text = $<HTMLTextAreaElement>('text');
-  text.value = state.mode === 'mishear' ? state.text : state.phonemes;
-  text.placeholder = state.mode === 'mishear' ? 'A line of verse, or several (each is heard on its own)' : 'ARPAbet, e.g. K IH1 S DH AH0 S K AY1 (one line per line)';
-  document.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach((r) => (r.checked = r.value === state.mode));
-  $<HTMLInputElement>('auto-run').checked = state.autoRun;
+  lineField.value = state.text;
+  lineFieldFrame.dataset.value = lineField.value;
 }
 
-function renderAll(): void {
-  renderInput();
-  renderProfiles();
-  renderKnobs('search', SEARCH_KNOBS, $('search-knobs'));
-  renderKnobs('cost', COST_KNOBS, $('cost-knobs'));
-  renderKnobs('lexicon', LEXICON_KNOBS, $('lexicon-knobs'));
-  renderSweepControls();
+function renderSettings(): void {
+  const baseline = renderProfiles();
+  renderKnobs('search', SEARCH_KNOBS, $('search-knobs'), baseline);
+  renderKnobs('cost', COST_KNOBS, $('cost-knobs'), baseline);
 }
 
 /** Rounds the f32 noise out of numbers from Rust (0.100000001 → 0.1). */
@@ -1169,85 +938,124 @@ function clean<T>(value: T): T {
 
 function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
   defaults = clean(m.defaults);
-  lexiconInfo = m.info;
+  Object.assign(defaults.search, {
+    distinct_sounds: true,
+    variety: 0.55,
+    shortlist: 30,
+    beam: 100,
+    max_bound: 30,
+  } satisfies Partial<SearchDto>);
   state = loadState();
-  lastLexicon = clean(m.lexicon);
-  seedDefaultProfiles();
-  renderAll();
-  renderLexiconInfo();
-  setStatus(`Loaded in ${thousands(m.loadMs)} ms`);
+  migrateBundledProfiles();
+  renderInput();
+  renderSettings();
 
-  const text = $<HTMLTextAreaElement>('text');
-  text.addEventListener('input', () => {
-    if (state.mode === 'mishear') state.text = text.value;
-    else state.phonemes = text.value;
-    $('source').textContent = '';
-    changed();
-  });
-  text.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      run();
+  const input = lineField;
+  input.addEventListener('beforeinput', (event) => {
+    if (!event.isComposing && (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph')) {
+      event.preventDefault();
     }
   });
-  document.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach((r) =>
-    r.addEventListener('change', () => {
-      state.mode = r.value as Mode;
-      renderInput();
-      changed();
-    }),
-  );
-  $<HTMLInputElement>('auto-run').addEventListener('change', (e) => {
-    state.autoRun = (e.target as HTMLInputElement).checked;
-    saveState();
+  input.addEventListener('input', (event) => {
+    if ((event as InputEvent).isComposing) lineFieldFrame.dataset.value = input.value;
+    else updateText();
   });
-  $('run').onclick = run;
+  input.addEventListener('compositionend', updateText);
+  input.addEventListener('paste', (event) => {
+    const pasted = event.clipboardData?.getData('text/plain');
+    if (pasted === undefined) return;
+    const line = singleLine(pasted);
+    if (line === pasted) return;
+    event.preventDefault();
+    input.setRangeText(line, input.selectionStart, input.selectionEnd, 'end');
+    updateText();
+  });
+  function updateText(): void {
+    const value = input.value;
+    const text = singleLine(value);
+    if (text !== value) {
+      const { selectionStart, selectionEnd, selectionDirection } = input;
+      input.value = text;
+      input.setSelectionRange(
+        singleLine(value.slice(0, selectionStart)).length,
+        singleLine(value.slice(0, selectionEnd)).length,
+        selectionDirection,
+      );
+    }
+    lineFieldFrame.dataset.value = text;
+    if (state.text !== input.value) changed();
+  }
+
   const sourceMenu = $<HTMLSelectElement>('line-source');
-  sourceMenu.replaceChildren(
-    ...[...Object.entries(SOURCES).map(([key, s]) => [key, s.label]), ['either', 'either']].map(([key, label]) =>
-      el('option', { value: key, textContent: label, selected: key === (state.lineSource ?? 'gatsby') }),
-    ),
-  );
+  sourceMenu.value = state.lineSource ?? 'gatsby';
+  for (const select of [sourceMenu, ...profileMenus]) {
+    select.addEventListener('pointerdown', () => select.setAttribute('data-pointer-focus', ''));
+    const clearPointerFocus = () => select.removeAttribute('data-pointer-focus');
+    select.addEventListener('pointercancel', clearPointerFocus);
+    select.addEventListener('blur', clearPointerFocus);
+    select.addEventListener('keydown', clearPointerFocus);
+  }
   sourceMenu.onchange = () => {
     state.lineSource = sourceMenu.value;
     saveState();
   };
   $('random-line').onclick = () => {
-    const key = state.lineSource ?? 'gatsby';
-    // "Either": every line of every source equally likely.
-    const pool = (key in SOURCES ? [SOURCES[key]] : Object.values(SOURCES)).flatMap((s) =>
-      s.lines.map((line) => ({ line, credit: s.credit })),
-    );
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (!pick) return;
-    state.mode = 'mishear';
-    state.text = pick.line;
+    const lines = SOURCES[state.lineSource ?? 'gatsby'];
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    if (!line) return;
+    state.text = line;
     renderInput();
-    $('source').textContent = `— ${pick.credit}`;
     changed();
-    if (!state.autoRun) run();
   };
   wireProfiles();
-  $('reset-all').onclick = () => {
-    const keep = { text: state.text, phonemes: state.phonemes, mode: state.mode };
-    state = { ...defaultState(), ...keep };
-    renderAll();
-    changed();
-  };
+  $('reset-all').onclick = () => applyProfile(state.profile ?? BASE_PROFILE);
   $('copy-link').onclick = async () => {
-    const url = `${location.origin}${location.pathname}#${encodeURIComponent(JSON.stringify(savedState()))}`;
-    await navigator.clipboard.writeText(url);
-    setStatus('Link copied.');
+    const shared = { ...savedState(), text: state.text || undefined };
+    const url = `${location.origin}${location.pathname}${location.search}#${encodeURIComponent(JSON.stringify(shared))}`;
+    $('settings-status').textContent = await copyText(url) ? 'Link copied.' : 'Could not copy link.';
   };
-  run();
+  for (const control of [input, ...profileMenus, $('random-line'), sourceMenu]) control.removeAttribute('disabled');
+  input.placeholder = 'Type a line to hear it wrong';
+  showEngineStatus('');
+  if (document.activeElement === document.body) input.focus({ preventScroll: true });
+  if (state.text.trim()) {
+    renderHearing();
+    setStatus('Finding a mishearing…', true);
+    void hearLine();
+  }
 }
 
-setStatus('Starting the engine…', true);
-// Build the saved lexicon from the start, so the first run needn't rebuild it.
-let savedLexicon: Partial<LexiconOptions> = {};
-try {
-  savedLexicon = (unsaved(readSaved()?.lexicon) as Partial<LexiconOptions>) ?? {};
-} catch {
-  /* the defaults, then */
+$('cycle-line').onclick = cycleLine;
+$('copy-result').onclick = copyResult;
+$('close-copy-fallback').onclick = () => {
+  resetCopyFeedback();
+  $('copy-result').focus();
+};
+const controls = $('controls');
+const advancedToggle = $('advanced');
+const closeAdvanced = $('close-advanced');
+const compactLayout = matchMedia('(max-width: 52rem)');
+
+function setAdvanced(open: boolean): void {
+  controls.hidden = !open;
+  advancedToggle.setAttribute('aria-expanded', String(open));
+  document.querySelector('main')?.classList.toggle('advanced-open', open);
 }
-worker.postMessage({ type: 'init', lexicon: savedLexicon } satisfies ToWorker);
+
+advancedToggle.onclick = () => {
+  const open = controls.hidden;
+  setAdvanced(open);
+  if (open && compactLayout.matches) closeAdvanced.focus();
+};
+closeAdvanced.onclick = () => {
+  setAdvanced(false);
+  advancedToggle.focus();
+};
+
+compactLayout.addEventListener('change', () => {
+  if (controls.hidden) return;
+  if (compactLayout.matches && $('workspace').contains(document.activeElement)) closeAdvanced.focus();
+  if (!compactLayout.matches && document.activeElement === closeAdvanced) advancedToggle.focus();
+});
+
+worker.postMessage({ type: 'init' } satisfies ToWorker);

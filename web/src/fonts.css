@@ -1,0 +1,20 @@
+@font-face {
+  font-family: 'UnifrakturMaguntia';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/unifrakturmaguntia.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Spectral';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/spectral.woff2') format('woff2');
+}
