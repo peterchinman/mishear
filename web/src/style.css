@@ -32,7 +32,7 @@ textarea {
 }
 
 button,
-select,
+.profile-select,
 input[type='number'],
 input[type='text'],
 textarea {
@@ -42,20 +42,10 @@ textarea {
 }
 
 button,
-select {
+.profile-select {
   min-height: 2.25rem;
   padding: 0.3rem 0.7rem;
   font-size: 0.85rem;
-}
-
-select {
-  appearance: none;
-  padding-inline-end: 1.65rem;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: right 0.73rem center, right 0.45rem center;
-  background-size: 0.28rem 0.28rem;
-  background-repeat: no-repeat;
 }
 
 button,
@@ -65,7 +55,7 @@ summary {
 }
 
 button:hover:not(:disabled),
-select:hover:not(:disabled) {
+.profile-select:has(> select:hover:not(:disabled)) {
   border-color: var(--interactive);
   color: var(--interactive);
 }
@@ -83,10 +73,6 @@ button:disabled {
 :focus-visible {
   outline: 2px solid var(--interactive);
   outline-offset: 3px;
-}
-
-select[data-pointer-focus]:focus {
-  outline: none;
 }
 
 .sr-only {
@@ -228,9 +214,19 @@ main.advanced-open {
   font-size: 0.85rem;
 }
 
-.profile-picker select {
-  min-inline-size: 3rem;
+.profile-select {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-inline-size: 3.5rem;
+  padding-inline-end: 0.75rem;
+}
+
+.profile-value {
+  min-inline-size: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .random-line-picker {
@@ -254,7 +250,6 @@ main.advanced-open {
 }
 
 .line-source {
-  position: relative;
   display: grid;
   place-items: center;
   width: 2.25rem;
@@ -268,12 +263,35 @@ main.advanced-open {
   color: var(--interactive);
 }
 
-.line-source:has(> select:focus-visible:not([data-pointer-focus])) {
+.select-trigger {
+  position: relative;
+}
+
+.select-trigger::after {
+  content: '';
+  box-sizing: border-box;
+  flex: none;
+  width: 0.42rem;
+  height: 0.42rem;
+  border: solid var(--muted);
+  border-width: 0 1.5px 1.5px 0;
+  border-radius: 0.06rem;
+  transform: translateY(-0.08rem) rotate(45deg);
+  pointer-events: none;
+}
+
+.line-source::after {
+  border-color: currentColor;
+}
+
+.select-trigger:has(> select:focus-visible:not([data-pointer-focus])) {
   outline: 2px solid var(--interactive);
   outline-offset: 3px;
 }
 
-#line-source {
+/* Paint the label and caret in the trigger so they don't depend on the
+   browser's select layout. The native select remains the interactive control. */
+.select-trigger > select {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -283,6 +301,7 @@ main.advanced-open {
   min-height: 0;
   margin: 0;
   padding: 0;
+  border: 0;
   overflow: clip;
   opacity: 0;
   font-size: 1rem;
@@ -294,38 +313,8 @@ main.advanced-open {
     appearance: base-select;
   }
 
-  .profile-picker select {
-    align-items: center;
-    gap: 0.75rem;
-    padding-inline-end: 0.75rem;
-    background-image: none;
-  }
-
-  .profile-picker select::picker-icon {
-    content: '';
-    align-self: center;
-    flex: none;
-    width: 0.42rem;
-    height: 0.42rem;
-    border: solid var(--muted);
-    border-width: 0 1.5px 1.5px 0;
-    border-radius: 0.06rem;
-    transform: translateY(-0.08rem) rotate(45deg);
-  }
-
-  .profile-picker select:open::picker-icon {
+  .select-trigger:has(> select:open)::after {
     transform: translateY(0.08rem) rotate(225deg);
-  }
-
-  .profile-picker selectedcontent {
-    min-inline-size: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .line-source:has(> select:open) svg {
-    transform: rotate(180deg);
   }
 
   select::picker(select) {

@@ -47,17 +47,15 @@
           <div class="input-controls">
             <div class="profile-picker">
               <label for="profile">Profile</label>
-              <select id="profile" disabled>
-                <button type="button"><selectedcontent></selectedcontent></button>
-              </select>
+              <div class="select-trigger profile-select">
+                <span id="profile-value" class="profile-value" aria-hidden="true">base</span>
+                <select id="profile" disabled></select>
+              </div>
               <button id="advanced" class="quiet" type="button" aria-controls="controls" aria-expanded="false">Advanced</button>
             </div>
             <div class="random-line-picker">
               <button id="random-line" type="button" disabled>Random line</button>
-              <div class="line-source">
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 6 L8 10 L12 6" />
-                </svg>
+              <div class="select-trigger line-source">
                 <select id="line-source" aria-label="Random line source" title="Random line source" disabled>
                   <option value="gatsby">Gatsby</option>
                   <option value="proverbs">proverbs</option>
@@ -108,9 +106,10 @@
         <div id="controls-scroll" class="scroll-area">
           <div class="profile-picker">
             <label for="advanced-profile">Profile</label>
-            <select id="advanced-profile" disabled>
-              <button type="button"><selectedcontent></selectedcontent></button>
-            </select>
+            <div class="select-trigger profile-select">
+              <span id="advanced-profile-value" class="profile-value" aria-hidden="true">base</span>
+              <select id="advanced-profile" disabled></select>
+            </div>
           </div>
           <div class="panel-actions">
             <button id="reset-all" type="button">Reset all</button>
