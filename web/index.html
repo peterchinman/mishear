@@ -47,7 +47,9 @@
           <div class="input-controls">
             <div class="profile-picker">
               <label for="profile">Profile</label>
-              <select id="profile" disabled></select>
+              <select id="profile" disabled>
+                <button type="button"><selectedcontent></selectedcontent></button>
+              </select>
               <button id="advanced" class="quiet" type="button" aria-controls="controls" aria-expanded="false">Advanced</button>
             </div>
             <div class="random-line-picker">
@@ -106,7 +108,9 @@
         <div id="controls-scroll" class="scroll-area">
           <div class="profile-picker">
             <label for="advanced-profile">Profile</label>
-            <select id="advanced-profile" disabled></select>
+            <select id="advanced-profile" disabled>
+              <button type="button"><selectedcontent></selectedcontent></button>
+            </select>
           </div>
           <div class="panel-actions">
             <button id="reset-all" type="button">Reset all</button>

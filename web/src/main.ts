@@ -586,9 +586,11 @@ function renderProfiles(): ProfileSettings {
   const selected = active !== undefined && !edited ? active : '';
   for (const menu of profileMenus) {
     // An option must stay mounted through change so the native picker can close.
-    const existing = [...menu.options].filter((option) => option.value);
+    const options = [...menu.options];
+    const existing = options.filter((option) => option.value);
     if (existing.length !== names.length || names.some((name, index) => existing[index].value !== name)) {
-      menu.replaceChildren(...names.map((name) => el('option', { value: name, textContent: name })));
+      options.forEach((option) => option.remove());
+      menu.append(...names.map((name) => el('option', { value: name, textContent: name })));
     }
     const placeholder = menu.querySelector<HTMLOptionElement>('option[value=""]');
     if (selected) {
@@ -596,7 +598,9 @@ function renderProfiles(): ProfileSettings {
     } else {
       const label = active === undefined ? 'Custom settings' : `${active} (edited)`;
       if (placeholder) placeholder.textContent = label;
-      else menu.prepend(el('option', { value: '', textContent: label, disabled: true }));
+      else {
+        menu.insertBefore(el('option', { value: '', textContent: label, disabled: true }), menu.options.item(0));
+      }
     }
     if (menu.value !== selected) menu.value = selected;
   }

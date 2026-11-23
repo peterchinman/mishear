@@ -228,6 +228,11 @@ main.advanced-open {
   font-size: 0.85rem;
 }
 
+.profile-picker select {
+  min-inline-size: 3rem;
+  text-overflow: ellipsis;
+}
+
 .random-line-picker {
   display: flex;
   min-height: 2.25rem;
@@ -276,6 +281,7 @@ main.advanced-open {
   min-height: 0;
   margin: 0;
   padding: 0;
+  overflow: clip;
   opacity: 0;
   font-size: 1rem;
 }
@@ -296,6 +302,7 @@ main.advanced-open {
   .profile-picker select::picker-icon {
     content: '';
     align-self: center;
+    flex: none;
     width: 0.42rem;
     height: 0.42rem;
     border: solid var(--muted);
@@ -306,6 +313,13 @@ main.advanced-open {
 
   .profile-picker select:open::picker-icon {
     transform: translateY(0.08rem) rotate(225deg);
+  }
+
+  .profile-picker selectedcontent {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .line-source:has(> select:open) svg {
@@ -347,6 +361,7 @@ main.advanced-open {
   }
 
   select option::checkmark {
+    flex: none;
     order: 1;
   }
 
@@ -437,10 +452,6 @@ main.advanced-open {
 
 #text::placeholder {
   color: var(--muted);
-}
-
-.profile-picker select {
-  min-width: 0;
 }
 
 #heard-section {
