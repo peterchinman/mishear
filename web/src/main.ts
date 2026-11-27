@@ -27,6 +27,20 @@ interface Knob {
 }
 type Group = 'search' | 'cost';
 
+const STARTING_SOUNDS = {
+  Consonants: {
+    B: 'bat', CH: 'chair', D: 'dog', DH: 'this', F: 'fog', G: 'go',
+    HH: 'hat', JH: 'jam', K: 'cat', L: 'leaf', M: 'moon', N: 'net',
+    NG: 'sing', P: 'pen', R: 'red', S: 'sun', SH: 'shoe', T: 'top',
+    TH: 'thin', V: 'van', W: 'wet', Y: 'yes', Z: 'zoo', ZH: 'measure',
+  },
+  Vowels: {
+    AA: 'odd', AE: 'ash', AH: 'up', AO: 'all', AW: 'out', AY: 'ice',
+    EH: 'edge', ER: 'earn', EY: 'eight', IH: 'it', IY: 'eve',
+    OW: 'own', OY: 'oyster', UH: 'book', UW: 'ooze',
+  },
+};
+
 const SEARCH_KNOBS: Knob[] = [
   {
     key: 'familiar',
@@ -140,12 +154,32 @@ interface State {
 // reaches everyone who hadn't touched that setting.
 const STORAGE_KEY = 'mishear-web-state-v3';
 const OLD_STORAGE_KEY = 'mishear-web-state-v2';
+const DEV_LINE_KEY = 'mishear-dev-line';
+const rememberDevLine = import.meta.env.DEV && new URLSearchParams(location.search).get('remember-line') === '1';
 let defaults: SettingsDefaults;
 let state: State;
 
+function readDevLine(): string {
+  if (!rememberDevLine) return '';
+  try {
+    return singleLine(sessionStorage.getItem(DEV_LINE_KEY) ?? '');
+  } catch {
+    return '';
+  }
+}
+
+function saveDevLine(text: string): void {
+  if (!rememberDevLine) return;
+  try {
+    sessionStorage.setItem(DEV_LINE_KEY, text);
+  } catch {
+    // The input still works when storage is unavailable.
+  }
+}
+
 function defaultState(): State {
   return {
-    text: '',
+    text: readDevLine(),
     ...fullProfile(BUILTIN_PROFILES[BASE_PROFILE]),
     profile: BASE_PROFILE,
   };
@@ -202,8 +236,16 @@ function loadState(): State {
 
 /** Older profiles and links can include engine options the site now fixes. */
 function editableSearch(search: Profile['search'] = {}) {
-  const { results, within, distinct_sounds, variety, shortlist, beam, max_bound, ...knobs } = search;
-  return knobs;
+  const {
+    results, within, distinct_sounds, variety, shortlist, beam, max_bound, starting_sound, ...knobs
+  } = search;
+  return { ...knobs, starting_sound: validStartingSound(starting_sound) };
+}
+
+function validStartingSound(value: unknown): SearchDto['starting_sound'] {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff) return value;
+  if (typeof value === 'string' && Object.values(STARTING_SOUNDS).some((group) => Object.hasOwn(group, value))) return value;
+  return undefined;
 }
 
 /** Settings that differ from the defaults. An explicit `null` turns an optional knob off. */
@@ -341,8 +383,8 @@ function showError(message: string): void {
 
 
 /** A knob's ⓘ button, and the technical description it shows and hides. */
-function infoToggle(knob: Knob): { button: HTMLButtonElement; text: HTMLParagraphElement } {
-  const text = el('p', { className: 'knob-info', textContent: knob.info, hidden: true });
+function infoToggle(description: string): { button: HTMLButtonElement; text: HTMLParagraphElement } {
+  const text = el('p', { className: 'knob-info', textContent: description, hidden: true });
   const button = el('button', { type: 'button', className: 'info', textContent: 'ⓘ', title: 'More detail' });
   button.setAttribute('aria-expanded', 'false');
   button.addEventListener('click', () => {
@@ -361,7 +403,7 @@ function knobControl(group: Group, knob: Knob, resetValue: unknown, onChange: ()
   const reset = el('button', { type: 'button', className: 'reset', textContent: 'reset', title: `Profile value: ${resetValue ?? 'off'}` });
   reset.setAttribute('aria-label', `Reset ${knob.label}`);
   const markChanged = () => wrap.classList.toggle('changed', (values[knob.key] ?? null) !== (resetValue ?? null));
-  const info = infoToggle(knob);
+  const info = infoToggle(knob.info);
   const commit = () => {
     markChanged();
     onChange();
@@ -423,6 +465,64 @@ function knobControl(group: Group, knob: Knob, resetValue: unknown, onChange: ()
   return wrap;
 }
 
+function startingSoundControl(resetValue: SearchDto['starting_sound']): HTMLElement {
+  const id = 'starting-sound';
+  const wrap = el('div', { className: 'knob' });
+  const label = el('label', { htmlFor: id, className: 'name', textContent: 'Starting sound' });
+  const info = infoToggle('Choose where to start searching the pronunciation dictionary from. F, e.g., starts “fog” and “phone”. This effect is most pronounced when the consonant add/drop/substitution scores are low. Default is "alphabetical by arpabet symbol"—B as in bat, CH as in chat, D as in dat, etc—going thru consonants and then vowels. Shuffle varies the sound order at each possible word start.');
+  const select = el('select', { id },
+    el('option', { value: '', textContent: 'Default' }),
+    el('option', { value: 'shuffle', textContent: 'Shuffle' }),
+    ...Object.entries(STARTING_SOUNDS).map(([group, sounds]) =>
+      el('optgroup', { label: group },
+        ...Object.entries(sounds).map(([sound, example]) =>
+          el('option', { value: sound, textContent: `${sound} as in ${example}` }),
+        ),
+      ),
+    ),
+  );
+  const selectedLabel = el('span', { className: 'select-value' });
+  selectedLabel.setAttribute('aria-hidden', 'true');
+  const trigger = el('div', { className: 'select-trigger labeled-select starting-sound-trigger' }, selectedLabel, select);
+  const again = el('button', { type: 'button', textContent: 'Shuffle again' });
+  const optionValue = (value: SearchDto['starting_sound']) => typeof value === 'number' ? 'shuffle' : value ?? '';
+  const resetLabel = [...select.options].find((option) => option.value === optionValue(resetValue))?.textContent ?? 'Default';
+  const reset = el('button', { type: 'button', className: 'reset', textContent: 'reset', title: `Profile value: ${resetLabel}` });
+  reset.setAttribute('aria-label', 'Reset starting sound');
+  const sync = () => {
+    const value = state.search.starting_sound;
+    const option = optionValue(value);
+    if (select.value !== option) select.value = option;
+    selectedLabel.textContent = select.selectedOptions[0]?.textContent ?? '';
+    again.hidden = typeof value !== 'number';
+    wrap.classList.toggle('changed', value !== resetValue);
+  };
+  const set = (value: SearchDto['starting_sound']) => {
+    state.search.starting_sound = value;
+    sync();
+    renderProfiles();
+    changed();
+  };
+  const shuffle = () => {
+    const [seed] = crypto.getRandomValues(new Uint32Array(1));
+    set(seed === state.search.starting_sound ? (seed + 1) >>> 0 : seed);
+  };
+  select.addEventListener('change', () => {
+    if (select.value === 'shuffle') shuffle();
+    else set(select.value || undefined);
+  });
+  again.addEventListener('click', shuffle);
+  reset.addEventListener('click', () => set(resetValue));
+  wrap.append(
+    el('div', { className: 'knob-head' }, label, info.button, reset),
+    el('div', { className: 'knob-inputs' }, trigger, again),
+    el('p', { className: 'hint', textContent: 'Words beginning with this sound get first chance at tied spots.' }),
+    info.text,
+  );
+  sync();
+  return wrap;
+}
+
 function renderKnobs(group: Group, knobs: Knob[], container: HTMLElement, baseline: ProfileSettings): void {
   const resetValues = groupValues(group, baseline);
   container.replaceChildren(
@@ -461,7 +561,7 @@ function renderAlignment(grid: HTMLElement, result: LineResult, heard: LineHeari
   }
 
   label('Sounds', 2);
-  result.input.forEach((ph, k) => place(el('div', { className: 'input ph', textContent: ph }), 2, k, k + 1));
+  result.input.forEach((ph, k) => place(el('div', { className: 'ph', textContent: ph }), 2, k, k + 1));
 
   label('Misheard', 3);
   const lineWords = new Set(result.words.map((word) => word.text));
@@ -473,9 +573,15 @@ function renderAlignment(grid: HTMLElement, result: LineResult, heard: LineHeari
     });
     place(chip, 3, word.start, word.end);
   }
+
+  label('Sounds', 4);
+  for (const word of heard) {
+    const sounds = el('div', { className: 'ph', textContent: word.phonemes.join(' ') });
+    place(sounds, 4, word.start, word.end);
+  }
   for (const boundary of result.boundaries) {
     const marker = el('div', { className: 'boundary' });
-    marker.style.gridRow = '1 / 4';
+    marker.style.gridRow = '1 / 5';
     marker.style.gridColumn = String(boundary + 2);
     cells.push(marker);
   }
@@ -493,7 +599,13 @@ interface Profile {
 
 type ProfileSettings = Pick<State, 'search' | 'cost'>;
 const BASE_PROFILE = 'base';
-const BUILTIN_PROFILES: Record<string, Profile> = Object.fromEntries(defaultProfiles.map(({ name, ...profile }) => [name, profile]));
+const BUILTIN_PROFILES: Record<string, Profile> = Object.fromEntries(
+  defaultProfiles.map(({ name, search, cost }) => [name, { search, cost }]),
+);
+const BUILTIN_PROFILE_GROUPS = ['Standard', 'Weird'].map((label) => ({
+  label,
+  names: defaultProfiles.filter((profile) => (profile.group ?? 'Standard') === label).map(({ name }) => name),
+}));
 const PROFILES_KEY = 'mishear-web-profiles-v1';
 const profileMenus = [$<HTMLSelectElement>('profile'), $<HTMLSelectElement>('advanced-profile')];
 
@@ -518,10 +630,10 @@ function writeProfiles(profiles: Record<string, Profile>): void {
   localStorage.setItem(PROFILES_KEY, JSON.stringify(custom));
 }
 
-/** Bundled names in their defined order, followed by custom names alphabetically. */
-function profileNames(profiles: Record<string, Profile>): string[] {
+/** Keep bundled profiles in their defined order within each group. */
+function profileGroups(profiles: Record<string, Profile>) {
   const custom = Object.keys(profiles).filter((name) => !isBuiltIn(name)).sort((a, b) => a.localeCompare(b));
-  return [...Object.keys(BUILTIN_PROFILES), ...custom];
+  return [...BUILTIN_PROFILE_GROUPS, { label: 'Custom', names: custom }].filter(({ names }) => names.length);
 }
 
 /** Preserves edits saved under a bundled name before those profiles became read-only. */
@@ -582,13 +694,16 @@ function renderProfiles(): ProfileSettings {
   const baseline = fullProfile(profiles[active ?? BASE_PROFILE]);
   const edited = active !== undefined && !sameSettings(state, baseline);
   const canEdit = active !== undefined && !isBuiltIn(active);
-  const names = profileNames(profiles);
+  const groups = profileGroups(profiles);
+  const names = groups.flatMap((group) => group.names);
   const selected = active !== undefined && !edited ? active : '';
   for (const menu of profileMenus) {
     // An option must stay mounted through change so the native picker can close.
     const existing = [...menu.options].filter((option) => option.value);
     if (existing.length !== names.length || names.some((name, index) => existing[index].value !== name)) {
-      menu.replaceChildren(...names.map((name) => el('option', { value: name, textContent: name })));
+      menu.replaceChildren(...groups.map(({ label, names }) =>
+        el('optgroup', { label }, ...names.map((name) => el('option', { value: name, textContent: name }))),
+      ));
     }
     const placeholder = menu.querySelector<HTMLOptionElement>('option[value=""]');
     if (selected) {
@@ -627,7 +742,7 @@ function askName(question: string, suggested: string, unless?: string): string |
   const name = prompt(question, suggested)?.trim();
   if (!name) return null;
   if (isBuiltIn(name)) {
-    $('settings-status').textContent = `“${name}” is a built-in profile. Choose another name.`;
+    alert(`“${name}” is a built-in profile. Choose another name.`);
     return null;
   }
   if (name !== unless && name in readProfiles() && !confirm(`Replace the profile “${name}”?`)) return null;
@@ -640,13 +755,61 @@ function wireProfiles(): void {
       if (menu.value) applyProfile(menu.value);
     };
   }
+
+  const actions = $('profile-actions');
+  const trigger = $<HTMLButtonElement>('profile-actions-trigger');
+  actions.addEventListener('click', ({ target }) => {
+    if (target instanceof HTMLButtonElement && !target.disabled) actions.hidePopover();
+  });
+  actions.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const buttons = [...actions.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+    const at = buttons.findIndex((button) => button === document.activeElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    buttons[(at + step + buttons.length) % buttons.length]?.focus();
+    event.preventDefault();
+  });
+  if (!CSS.supports('top: anchor(bottom)')) {
+    actions.addEventListener('beforetoggle', (event) => {
+      if ((event as ToggleEvent).newState !== 'open') return;
+      const rect = trigger.getBoundingClientRect();
+      const height = document.documentElement.clientHeight;
+      const gap = 6;
+      const below = height - rect.bottom - gap;
+      const above = rect.top - gap;
+      const flip = below < 224 && above > below;
+      actions.style.top = flip ? 'auto' : `${rect.bottom + gap}px`;
+      actions.style.bottom = flip ? `${height - rect.top + gap}px` : 'auto';
+      actions.style.right = `${document.documentElement.clientWidth - rect.right}px`;
+      actions.style.maxHeight = `${flip ? above : below}px`;
+    });
+  }
+  trigger.disabled = false;
+
+  $('reset-all').onclick = () => applyProfile(state.profile ?? BASE_PROFILE);
+  let linkFeedbackTimer: number | undefined;
+  $('copy-link').onclick = async () => {
+    const shared = { ...savedState(), text: state.text || undefined };
+    const url = `${location.origin}${location.pathname}${location.search}#${encodeURIComponent(JSON.stringify(shared))}`;
+    if (!await copyText(url)) {
+      prompt('Copy this link manually.', url);
+      return;
+    }
+    clearTimeout(linkFeedbackTimer);
+    trigger.classList.add('copied');
+    trigger.setAttribute('aria-label', 'Profile options, link copied');
+    linkFeedbackTimer = window.setTimeout(() => {
+      trigger.classList.remove('copied');
+      trigger.setAttribute('aria-label', trigger.title);
+    }, 1600);
+  };
+
   $('profile-save').onclick = () => {
     if (state.profile === undefined || isBuiltIn(state.profile)) return;
     const profiles = readProfiles();
     profiles[state.profile] = savedProfile(state);
     writeProfiles(profiles);
     renderSettings();
-    $('settings-status').textContent = `Saved “${state.profile}”.`;
   };
   $('profile-save-as').onclick = () => {
     const name = askName('Save these knobs as a profile named:', state.profile ? `${state.profile} 2` : '');
@@ -657,7 +820,6 @@ function wireProfiles(): void {
     state.profile = name;
     saveState();
     renderSettings();
-    $('settings-status').textContent = `Saved “${name}”.`;
   };
   $('profile-rename').onclick = () => {
     const old = state.profile;
@@ -709,6 +871,7 @@ let copyFeedbackTimer: number | undefined;
 
 function changed(): void {
   state.text = lineField.value;
+  saveDevLine(state.text);
   saveState();
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   revision++;
@@ -927,6 +1090,7 @@ function renderInput(): void {
 function renderSettings(): void {
   const baseline = renderProfiles();
   renderKnobs('search', SEARCH_KNOBS, $('search-knobs'), baseline);
+  $('search-knobs').append(startingSoundControl(baseline.search.starting_sound));
   renderKnobs('cost', COST_KNOBS, $('cost-knobs'), baseline);
 }
 
@@ -1011,16 +1175,13 @@ function onReady(m: Extract<FromWorker, { type: 'ready' }>): void {
     changed();
   };
   wireProfiles();
-  $('reset-all').onclick = () => applyProfile(state.profile ?? BASE_PROFILE);
-  $('copy-link').onclick = async () => {
-    const shared = { ...savedState(), text: state.text || undefined };
-    const url = `${location.origin}${location.pathname}${location.search}#${encodeURIComponent(JSON.stringify(shared))}`;
-    $('settings-status').textContent = await copyText(url) ? 'Link copied.' : 'Could not copy link.';
-  };
   for (const control of [input, ...profileMenus, $('random-line'), sourceMenu]) control.removeAttribute('disabled');
   input.placeholder = 'Type a line to hear it wrong';
   showEngineStatus('');
-  if (document.activeElement === document.body) input.focus({ preventScroll: true });
+  if (document.activeElement === document.body) {
+    const focusTarget = compactLayout.matches && !controls.hidden ? closeAdvanced : input;
+    focusTarget.focus({ preventScroll: true });
+  }
   if (state.text.trim()) {
     renderHearing();
     setStatus('Finding a mishearing…', true);
@@ -1038,11 +1199,28 @@ const controls = $('controls');
 const advancedToggle = $('advanced');
 const closeAdvanced = $('close-advanced');
 const compactLayout = matchMedia('(max-width: 52rem)');
+const ADVANCED_PANEL_KEY = 'mishear-advanced-panel';
 
-function setAdvanced(open: boolean): void {
+function renderAdvanced(open: boolean): void {
+  if (!open) $('profile-actions').hidePopover?.();
   controls.hidden = !open;
   advancedToggle.setAttribute('aria-expanded', String(open));
   document.querySelector('main')?.classList.toggle('advanced-open', open);
+}
+
+function setAdvanced(open: boolean): void {
+  renderAdvanced(open);
+  try {
+    localStorage.setItem(ADVANCED_PANEL_KEY, open ? 'open' : 'closed');
+  } catch {
+    // The panel can still be toggled when storage is unavailable.
+  }
+}
+
+try {
+  renderAdvanced(localStorage.getItem(ADVANCED_PANEL_KEY) === 'open');
+} catch {
+  // Use the initial layout when storage is unavailable.
 }
 
 advancedToggle.onclick = () => {

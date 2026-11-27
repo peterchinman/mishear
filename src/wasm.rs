@@ -12,7 +12,7 @@ use crate::deform::VowelChart;
 use crate::engine::{Engine, MishearConfig, Variety};
 use crate::lexicon::{BIGRAM_PRIOR, Frequency, SpellingVariants, parse_frequencies};
 use crate::phone::Ph;
-use crate::search::{PronunciationExclusion, SearchConfig};
+use crate::search::{PronunciationExclusion, SearchConfig, StartingSound};
 use crate::spec::{self, StepSpec};
 use crate::{accents, knobs};
 use std::sync::Arc;
@@ -60,7 +60,14 @@ pub struct CostDto {
     pub swap: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Tsify)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tsify)]
+#[serde(untagged)]
+pub enum StartingSoundDto {
+    Sound(String),
+    ShuffleSeed(u32),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct SearchDto {
     pub results: usize,
@@ -75,6 +82,9 @@ pub struct SearchDto {
     /// alone (and needs no word-pair counts).
     pub fit: f32,
     pub word_penalty: f32,
+    /// An ARPAbet symbol to visit first, or a seed for shuffling starting sounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starting_sound: Option<StartingSoundDto>,
     pub shortlist: usize,
     /// With bigrams, partial matches kept per position.
     pub beam: usize,
@@ -126,6 +136,13 @@ pub struct PronunciationExclusionDto {
 
 impl From<SearchDto> for MishearConfig {
     fn from(s: SearchDto) -> Self {
+        let starting_sound = match s.starting_sound {
+            Some(StartingSoundDto::Sound(symbol)) => Ph::consonant(&symbol)
+                .or_else(|| Ph::vowel(&symbol, 0))
+                .map_or(StartingSound::Default, StartingSound::First),
+            Some(StartingSoundDto::ShuffleSeed(seed)) => StartingSound::Shuffle(seed),
+            None => StartingSound::Default,
+        };
         Self {
             search: SearchConfig {
                 results: s.results.max(1),
@@ -134,6 +151,7 @@ impl From<SearchDto> for MishearConfig {
                 familiar: s.familiar,
                 fit: s.fit,
                 word_penalty: s.word_penalty,
+                starting_sound,
                 shortlist: s.shortlist,
                 beam: s.beam.max(1),
                 distinct_sounds: s.distinct_sounds,
@@ -164,6 +182,8 @@ pub struct HeardWordDto {
     pub end: usize,
     /// Identifies the selected pronunciation within the current lexicon.
     pub pronunciation: u32,
+    /// The phonemes of the pronunciation selected by the search.
+    pub phonemes: Vec<String>,
 }
 
 #[derive(Serialize, Debug, Tsify)]
@@ -462,6 +482,7 @@ impl MishearApp {
                                     start: span.start,
                                     end: span.end,
                                     pronunciation,
+                                    phonemes: spelled(&lexicon.pronunciation(pronunciation)),
                                 })
                                 .collect(),
                         })
@@ -522,6 +543,7 @@ impl MishearApp {
                                     start: span.start,
                                     end: span.end,
                                     pronunciation,
+                                    phonemes: spelled(&lexicon.pronunciation(pronunciation)),
                                 })
                                 .collect(),
                         })
@@ -595,6 +617,7 @@ pub fn defaults() -> DefaultsDto {
             familiar: search.familiar,
             fit: search.fit,
             word_penalty: search.word_penalty,
+            starting_sound: None,
             shortlist: search.shortlist,
             beam: search.beam,
             distinct_sounds: search.distinct_sounds,

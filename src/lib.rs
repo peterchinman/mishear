@@ -11,6 +11,7 @@ pub mod engine;
 pub mod knobs;
 pub mod lexicon;
 pub mod phone;
+mod random;
 pub mod search;
 pub mod spec;
 #[cfg(target_arch = "wasm32")]
@@ -22,4 +23,4 @@ pub use deform::{Action, Class, Context, Deformation, Rule, VowelChart, VowelMov
 pub use engine::{Engine, Heard, MishearConfig, Mishearing, Reading, Variety};
 pub use lexicon::{Lexicon, WordId};
 pub use phone::Ph;
-pub use search::{Match, SearchConfig, SearchStats, best_matches, search};
+pub use search::{Match, SearchConfig, SearchStats, StartingSound, best_matches, search};

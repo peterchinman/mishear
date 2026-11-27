@@ -88,9 +88,13 @@ function runLine(engine: MishearApp, request: RequestDto): LineResult {
       }
     }
     const offset = line.input.length;
+    const { starting_sound } = request.search;
     const result = engine.run({
       ...request,
       text: tokens.slice(start, end).join(' '),
+      search: typeof starting_sound === 'number'
+        ? { ...request.search, starting_sound: (starting_sound + offset) >>> 0 }
+        : request.search,
       excluded_pronunciations: request.excluded_pronunciations
         ?.filter((exclusion) => exclusion.start >= offset)
         .map((exclusion) => ({ ...exclusion, start: exclusion.start - offset, end: exclusion.end - offset })),

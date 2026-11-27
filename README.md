@@ -146,6 +146,9 @@ npm run dev     # builds the wasm, links the data into public/data, starts Vite
 npm run build   # the same, into dist/
 ```
 
+Add `?remember-line=1` to the local dev server URL to keep the input across
+refreshes in the same tab.
+
 Type or paste a line of text and the page searches automatically after a short
 pause. **Random line** draws from *The Great Gatsby* or proverbs. Use its
 chevron to choose a collection.
@@ -156,13 +159,17 @@ to search again with that spelling and pronunciation excluded from
 overlapping sound spans. Other words and their boundaries can change.
 Repeated clicks in the same part of the line keep earlier exclusions
 until you select a separate span or cycle the line. The alignment chart
-shows the original words, their sounds, and the current result. For long
+shows the original words and the current result, with the sounds of each. For long
 passages, the app searches shorter phrases and joins them into one result.
 
 Mishearing Engine starts with the **base** profile. Choose a different **Profile**
 below the input or at the top of **Advanced**. Built-in profiles are read-only,
 and **Save as…** keeps your adjustments in a custom profile. **Advanced**
 opens the search and phonetic cost settings along with profile management.
+**Starting sound** gives pronunciations that begin with the selected sound
+first chance at tied shortlist slots. **Shuffle** varies the order at each
+possible word start. **Shuffle again** tries a new seed, which is saved with
+the settings and shared links.
 The web app uses a 100,000-word vocabulary limit and all eligible pronunciations. Settings and
 profiles are stored in the browser. **Copy link** shares the current settings.
 

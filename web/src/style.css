@@ -32,7 +32,7 @@ textarea {
 }
 
 button,
-.profile-select,
+.labeled-select,
 input[type='number'],
 input[type='text'],
 textarea {
@@ -42,7 +42,7 @@ textarea {
 }
 
 button,
-.profile-select {
+.labeled-select {
   min-height: 2.25rem;
   padding: 0.3rem 0.7rem;
   font-size: 0.85rem;
@@ -55,7 +55,7 @@ summary {
 }
 
 button:hover:not(:disabled),
-.profile-select:has(> select:hover:not(:disabled)) {
+.labeled-select:has(> select:hover:not(:disabled)) {
   border-color: var(--interactive);
   color: var(--interactive);
 }
@@ -214,7 +214,7 @@ main.advanced-open {
   font-size: 0.85rem;
 }
 
-.profile-select {
+.labeled-select {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -222,7 +222,7 @@ main.advanced-open {
   padding-inline-end: 0.75rem;
 }
 
-.profile-value {
+.select-value {
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -335,6 +335,14 @@ main.advanced-open {
     scrollbar-color: var(--scroll-thumb) transparent;
   }
 
+  select optgroup:not(:first-child) {
+    padding-block-start: 0.65rem;
+  }
+
+  select optgroup > option:first-of-type {
+    margin-block-start: 0.325rem;
+  }
+
   select option {
     display: flex;
     justify-content: space-between;
@@ -344,6 +352,10 @@ main.advanced-open {
     padding: 0.4rem 0.65rem;
     border-radius: 0.45rem;
     overflow-wrap: anywhere;
+  }
+
+  select optgroup > option {
+    padding-inline-start: 0.9rem;
   }
 
   select option:checked {
@@ -479,12 +491,12 @@ main.advanced-open {
   line-height: 1;
 }
 
-#copy-result.copied svg,
+.icon-button.copied svg,
 .copied-mark {
   display: none;
 }
 
-#copy-result.copied .copied-mark {
+.icon-button.copied .copied-mark {
   display: block;
   color: var(--interactive);
   font-size: 1.1rem;
@@ -639,7 +651,7 @@ button.heard-word:is(:hover, :focus-visible) {
   text-align: center;
 }
 
-.alignment .input {
+.alignment .ph {
   color: var(--muted);
   font-family: ui-monospace, monospace;
   text-align: center;
@@ -698,6 +710,16 @@ button.heard-word:is(:hover, :focus-visible) {
   margin-bottom: 0.85rem;
 }
 
+#profile-actions-trigger {
+  flex: none;
+  font-size: 1.25rem;
+  anchor-name: --profile-actions-trigger;
+}
+
+#profile-actions-trigger.copied .ellipsis-mark {
+  display: none;
+}
+
 #advanced-title {
   margin: 0;
   font-size: 1rem;
@@ -719,16 +741,47 @@ button.heard-word:is(:hover, :focus-visible) {
   padding-bottom: 0.75rem;
 }
 
-.panel-actions,
-.profiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-bottom: 0.6rem;
+#profile-actions {
+  display: none;
+  position: fixed;
+  position-anchor: --profile-actions-trigger;
+  inset: auto;
+  top: calc(anchor(bottom) + 0.35rem);
+  right: anchor(right);
+  position-try-fallbacks: flip-block;
+  width: min(10rem, calc(100vw - 1rem));
+  max-height: calc(100dvh - 1rem);
+  margin: 0;
+  padding: 0.25rem;
+  overflow: auto;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 0.45rem 1.25rem rgb(0 0 0 / 16%);
 }
 
-#settings-status:not(:empty) {
-  margin-bottom: 0.6rem;
+#profile-actions:popover-open {
+  display: grid;
+}
+
+#profile-actions button {
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+
+#profile-actions button:not(:disabled):is(:hover, :focus-visible) {
+  background: var(--accent);
+  color: var(--accent-text);
+  outline-offset: -2px;
+}
+
+#profile-actions button:disabled {
+  display: block;
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
 }
 
 .knob {
@@ -785,6 +838,12 @@ button.heard-word:is(:hover, :focus-visible) {
   flex: 1;
   min-width: 0;
   accent-color: var(--interactive);
+}
+
+.starting-sound-trigger {
+  flex: 1;
+  min-inline-size: 0;
+  justify-content: space-between;
 }
 
 .knob-inputs input[type='number'] {

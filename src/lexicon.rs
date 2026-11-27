@@ -15,6 +15,7 @@ pub type WordId = u32;
 
 #[derive(Default)]
 struct Node {
+    parent: u32,
     /// Sorted by phoneme.
     children: Vec<(Ph, u32)>,
     /// Words whose pronunciation ends here.
@@ -548,7 +549,10 @@ impl Lexicon {
                 Ok(k) => children[k].1 as usize,
                 Err(k) => {
                     let child = self.nodes.len();
-                    self.nodes.push(Node::default());
+                    self.nodes.push(Node {
+                        parent: node as u32,
+                        ..Node::default()
+                    });
                     self.nodes[node].children.insert(k, (p, child as u32));
                     child
                 }
@@ -575,6 +579,23 @@ impl Lexicon {
     /// The word's first pronunciation.
     pub fn first_pronunciation(&self, id: WordId) -> &[Ph] {
         &self.first[id as usize]
+    }
+
+    /// The phonemes for a pronunciation node returned by a search of this lexicon.
+    pub fn pronunciation(&self, mut node: u32) -> Vec<Ph> {
+        let mut phonemes = Vec::new();
+        while node != 0 {
+            let parent = self.nodes[node as usize].parent;
+            let &(phoneme, _) = self
+                .children(parent as usize)
+                .iter()
+                .find(|&&(_, child)| child == node)
+                .expect("every non-root node has an incoming edge");
+            phonemes.push(phoneme);
+            node = parent;
+        }
+        phonemes.reverse();
+        phonemes
     }
 
     pub fn word(&self, id: WordId) -> &str {

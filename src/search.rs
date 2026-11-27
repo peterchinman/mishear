@@ -41,6 +41,7 @@ use crate::clock::Stopwatch;
 use crate::cost::CostModel;
 use crate::lexicon::{Lexicon, WordId};
 use crate::phone::Ph;
+use crate::random::splitmix64;
 
 #[derive(Debug, Clone)]
 pub struct PronunciationExclusion {
@@ -49,6 +50,18 @@ pub struct PronunciationExclusion {
     pub pronunciation: u32,
     /// When present, block this spelling and the pronunciation on overlapping spans.
     pub word: Option<WordId>,
+}
+
+/// Which pronunciations get offered first when building each span's shortlist.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum StartingSound {
+    #[default]
+    Default,
+    /// Begin with this sound and wrap around the usual order. For vowels,
+    /// start with the whole sound regardless of stress.
+    First(Ph),
+    /// Shuffle the order independently at each input position using this seed.
+    Shuffle(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +89,8 @@ pub struct SearchConfig {
     pub fit: f32,
     /// Cost per word.
     pub word_penalty: f32,
+    /// Order among possible starting sounds. Affects shortlist ties.
+    pub starting_sound: StartingSound,
     /// Extra cost per word, e.g. for words the input already contains.
     pub extra: HashMap<WordId, f32>,
     /// `boundary_cost[p]`: extra cost for a word boundary at input position
@@ -155,6 +170,7 @@ impl Default for SearchConfig {
             familiar: None,
             fit: 0.005,
             word_penalty: 0.4,
+            starting_sound: StartingSound::Default,
             extra: HashMap::new(),
             boundary_cost: Vec::new(),
             excluded_pronunciations: Vec::new(),
@@ -278,6 +294,12 @@ pub fn lattice(
         .map(|w| least_word_cost(lexicon, config, w) + extra(w))
         .collect();
     let subtree_min = subtree_min_cost(lexicon, &word_cost);
+    let root = lexicon.children(0);
+    let mut ordered_root = root.to_vec();
+    if let StartingSound::First(sound) = config.starting_sound {
+        let first = root.partition_point(|&(ph, _)| ph < sound.with_stress(0));
+        ordered_root.rotate_left(first);
+    }
     let mut lattice = Lattice {
         edges: Vec::with_capacity(n),
         bound: config.bound,
@@ -285,9 +307,13 @@ pub fn lattice(
         nodes: 0,
         edge_count: 0,
     };
-    // A word can't cover a span longer than itself plus what the bound
-    // allows in dropped input.
-    let extra_span = (config.bound / cost.min_indel()).floor() as usize;
+    // With free deletions, the bound cannot limit a word's input span.
+    let span_limit = if cost.min_indel() == 0.0 {
+        n
+    } else {
+        let extra_span = (config.bound / cost.min_indel()).floor() as usize;
+        lexicon.max_depth().saturating_add(extra_span)
+    };
     let mut present = vec![0u64; lexicon.len()];
     let mut touched: Vec<WordId> = Vec::new();
     // `reach[p]`: the cheapest way to cover input[..p] with the words found
@@ -298,7 +324,7 @@ pub fn lattice(
     let mut reach = vec![f32::INFINITY; n + 1];
     reach[0] = 0.0;
     for s in 0..n {
-        let span_max = (n - s).min(lexicon.max_depth() + extra_span);
+        let span_max = (n - s).min(span_limit);
         // Every word starting here pays for the boundary before it.
         let before = reach[s] + boundary_cost(config, s);
         if before > config.bound {
@@ -343,7 +369,11 @@ pub fn lattice(
             .iter()
             .copied()
             .fold(f32::INFINITY, f32::min);
-        walk.descend(0, 0, None, root_min);
+        if let StartingSound::Shuffle(seed) = config.starting_sound {
+            let key = (u64::from(seed) << 32) ^ ((s as u64) << 8);
+            ordered_root.sort_unstable_by_key(|&(ph, _)| splitmix64(key ^ ph.index() as u64));
+        }
+        walk.descend(&ordered_root, 0, None, root_min);
         lattice.nodes += walk.nodes;
         lattice.edge_count += walk.best.iter().map(Vec::len).sum::<usize>();
         // Spans keep their words cheapest first.
@@ -713,12 +743,12 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// Scores `node`'s children. `last` is the phoneme on the edge into
-    /// `node` and `node_min` the minimum of its column, for swaps.
-    fn descend(&mut self, node: usize, depth: usize, last: Option<Ph>, node_min: f32) {
+    /// Scores the children of a node. `last` is the phoneme on the edge into
+    /// that node and `node_min` the minimum of its column, for swaps.
+    fn descend(&mut self, children: &[(Ph, u32)], depth: usize, last: Option<Ph>, node_min: f32) {
         let w = self.width;
         let lexicon = self.lexicon;
-        for &(q, child) in lexicon.children(node) {
+        for &(q, child) in children {
             let pronunciation = child;
             let child = child as usize;
             self.nodes += 1;
@@ -791,7 +821,7 @@ impl Walk<'_> {
                 }
             }
             if depth + 1 < lexicon.max_depth() {
-                self.descend(child, depth + 1, Some(q), min);
+                self.descend(lexicon.children(child), depth + 1, Some(q), min);
             }
         }
     }
@@ -875,6 +905,73 @@ mod tests {
     }
 
     #[test]
+    fn starting_sound_orders_ties_and_keeps_cheaper_words_first() {
+        let lexicon = test_lexicon(
+            b"BAT  B AE1 T\nFAT  F AE1 T\nFEET  F IY1 T\n",
+            &["bat", "fat", "feet"],
+        );
+        let cost = CostModel::new(crate::CostConfig {
+            consonant_indel: 0.0,
+            ..crate::CostConfig::default()
+        });
+        let mut config = SearchConfig {
+            results: 1,
+            bound: 1.0,
+            fit: 0.0,
+            commonness: 0.0,
+            word_penalty: 0.0,
+            ..SearchConfig::default()
+        };
+        // Free consonants let a word cover a span longer than its pronunciation.
+        let input = Ph::parse_all("S T AE1 N D").unwrap();
+        let (usual, _) = search(&input, &lexicon, &cost, &config);
+        config.starting_sound = StartingSound::First(Ph::parse("F").unwrap());
+        let (f_first, _) = search(&input, &lexicon, &cost, &config);
+        assert_eq!(usual[0].text(&lexicon), "bat");
+        assert_eq!(f_first[0].text(&lexicon), "fat");
+        assert_eq!(usual[0].cost, f_first[0].cost);
+        assert_eq!(f_first[0].spans, [0..5]);
+
+        let input = Ph::parse_all("IY1").unwrap();
+        config.starting_sound = StartingSound::First(Ph::parse("B").unwrap());
+        let (best, _) = search(&input, &lexicon, &cost, &config);
+        assert_eq!(best[0].text(&lexicon), "feet");
+    }
+
+    #[test]
+    fn shuffle_is_seeded_and_varies_by_word_start() {
+        let lexicon = test_lexicon(
+            b"BAT  B AE1 T\nFAT  F AE1 T\nMAT  M AE1 T\nSAT  S AE1 T\n",
+            &["bat", "fat", "mat", "sat"],
+        );
+        let input = [Ph::parse("AE1").unwrap(); 12];
+        let cost = CostModel::new(crate::CostConfig {
+            consonant_indel: 0.0,
+            ..crate::CostConfig::default()
+        });
+        let choices = |seed| {
+            let config = SearchConfig {
+                results: 1,
+                bound: 0.0,
+                fit: 0.0,
+                commonness: 0.0,
+                word_penalty: 0.0,
+                starting_sound: StartingSound::Shuffle(seed),
+                ..SearchConfig::default()
+            };
+            lattice(&input, &lexicon, &cost, &config, 1)
+                .edges
+                .iter()
+                .map(|spans| spans[0][0].word)
+                .collect::<Vec<_>>()
+        };
+        let first = choices(42);
+        assert_eq!(first, choices(42));
+        assert_ne!(first, choices(43));
+        assert!(first.iter().any(|&word| word != first[0]));
+    }
+
+    #[test]
     fn excluding_one_pronunciation_can_move_boundaries_and_keeps_other_spans_available() {
         let lexicon = test_lexicon(
             b"FLY  F L AY1\nFLYING  F L AY1 IH1 N\nIN  IH1 N\n",
@@ -926,6 +1023,7 @@ mod tests {
         let lead = initial.iter().find(|m| m.text(&lexicon) == "lead").unwrap();
         let led = initial.iter().find(|m| m.text(&lexicon) == "led").unwrap();
         assert_eq!(lead.pronunciations, led.pronunciations);
+        assert_eq!(lexicon.pronunciation(lead.pronunciations[0]), input);
         config.excluded_pronunciations.push(PronunciationExclusion {
             span: 0..3,
             pronunciation: lead.pronunciations[0],
@@ -939,6 +1037,10 @@ mod tests {
             .find(|m| m.text(&lexicon) == "lead")
             .unwrap();
         assert_ne!(next.pronunciations, lead.pronunciations);
+        assert_eq!(
+            lexicon.pronunciation(next.pronunciations[0]),
+            Ph::parse_all("L IY1 D").unwrap()
+        );
         assert!(next.phonetic > lead.phonetic);
     }
 
